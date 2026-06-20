@@ -1,0 +1,23 @@
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*~
+*.swp
+*.swo
+
+# Logs & temp
+*.log
+*.tmp
+*.bak
+
+# PHP / Composer (vendor is committed on purpose so the plugin runs as-is)
+.phpunit.result.cache
