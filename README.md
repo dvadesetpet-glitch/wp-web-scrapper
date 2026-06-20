@@ -1,4 +1,4 @@
-# posao — WP Web Scraper (fork)
+# WP Web Scraper — fork (WP WS Reborn 2026)
 
 This repository is a fork of [wp-plugins/wp-web-scrapper](https://github.com/wp-plugins/wp-web-scrapper),
 the original **WP Web Scraper** plugin by Akshay Raje. The original plugin files
