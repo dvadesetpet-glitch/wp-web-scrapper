@@ -1,15 +1,16 @@
-# WP Web Scraper — fork (WP WS Reborn 2026)
+# WP WS Reborn 2026
 
-This repository is a fork of [wp-plugins/wp-web-scrapper](https://github.com/wp-plugins/wp-web-scrapper),
-the original **WP Web Scraper** plugin by Akshay Raje. The original plugin files
-remain at the repository root for reference.
+A hardened, feature-extended fork of [WP Web Scraper](https://github.com/wp-plugins/wp-web-scrapper)
+(by Akshay Raje). **Self-contained:** download or clone this repository and use it
+directly as a WordPress plugin — `vendor/` is bundled, so no Composer install is needed.
 
-## WP WS Reborn 2026
+## Install
 
-An updated, hardened version lives in [`WP-WS-Reborn-2026/`](WP-WS-Reborn-2026/).
-Install that folder as a WordPress plugin (`wp-content/plugins/WP-WS-Reborn-2026/`).
+Copy this folder into `wp-content/plugins/` (e.g. `wp-content/plugins/wp-ws-reborn-2026/`),
+then activate **WP WS Reborn 2026** under Plugins. Configure it under
+**Settings → WP WS Reborn 2026** (Sandbox tab to test shortcodes).
 
-Highlights over the original:
+## Highlights over the original
 
 - **JSONPath** query type for JSON APIs (`query_type="jsonpath"`)
 - Feed link shortcodes: `wpws_atom_links`, `wpws_atom_zip_links`
@@ -20,8 +21,8 @@ Highlights over the original:
 - Security hardening: SSRF redirect re-validation (IPv4/IPv6 + integer-IP forms),
   allow-listed callbacks, credential masking, `LIBXML_NONET`, response-size cap
 
-See [`WP-WS-Reborn-2026/readme.txt`](WP-WS-Reborn-2026/readme.txt) for the full
-changelog and usage guide.
+See [`readme.txt`](readme.txt) for the full changelog, and the in-plugin **Help** tab
+or [`help-files/html/wpws-guide.html`](help-files/html/wpws-guide.html) for the complete guide.
 
 ## License
 
