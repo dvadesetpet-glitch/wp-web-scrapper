@@ -1,5 +1,17 @@
 {
+    "name": "dvadesetpet-glitch/wp-ws-reborn-2026",
+    "description": "WP WS Reborn 2026 - web scraper for WordPress (fork of WP Web Scraper).",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
     "require": {
-        "symfony/css-selector": "2.5.5"
+        "php": ">=7.4",
+        "symfony/css-selector": "^5.4"
+    },
+    "config": {
+        "platform": {
+            "php": "7.4.0"
+        },
+        "platform-check": false,
+        "sort-packages": true
     }
 }

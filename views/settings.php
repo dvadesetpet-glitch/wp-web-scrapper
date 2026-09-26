@@ -40,8 +40,8 @@
 
                     <p><span class="wpws-ex-cat"><?php _e( 'HTML tables', 'wp-web-scraper' ); ?>:</span>
                       <a href="#" class="wpws-sandbox-example" data-url="https://www.w3schools.com/html/html_tables.asp" data-query="#customers tr" data-args="eq=3"><?php _e( '4th row only (eq=3)', 'wp-web-scraper' ); ?></a> ·
-                      <a href="#" class="wpws-sandbox-example" data-url="https://www.w3schools.com/html/html_tables.asp" data-query="#customers" data-args="callback=wpws_keep_first_3_columns"><?php _e( 'Keep first 3 columns (callback)', 'wp-web-scraper' ); ?></a> ·
-                      <a href="#" class="wpws-sandbox-example" data-url="https://www.w3schools.com/html/html_tables.asp" data-query="#customers" data-args="callback=wpws_keep_first_4_rows"><?php _e( 'Keep first 4 rows (callback)', 'wp-web-scraper' ); ?></a> ·
+                      <a href="#" class="wpws-sandbox-example" data-url="https://www.w3schools.com/html/html_tables.asp" data-query="#customers" data-args="callback=wpws_keep_columns:1-3"><?php _e( 'Keep first 3 columns (callback)', 'wp-web-scraper' ); ?></a> ·
+                      <a href="#" class="wpws-sandbox-example" data-url="https://www.w3schools.com/html/html_tables.asp" data-query="#customers" data-args="callback=wpws_keep_rows:1-4"><?php _e( 'Keep first 4 rows (callback)', 'wp-web-scraper' ); ?></a> ·
                       <a href="#" class="wpws-sandbox-example" data-url="https://www.w3schools.com/html/html_tables.asp" data-query="#customers" data-args="callback=wpws_drop_columns:2"><?php _e( 'Drop column 2 (keep the rest)', 'wp-web-scraper' ); ?></a>
                     </p>
 
@@ -86,7 +86,7 @@
                     <a href="#" class="wpws-shortcode-example" data-shortcode="<?php echo esc_attr( '[wpws url="https://example.com" query="h1"]' ); ?>"><?php _e( 'Basic CSS', 'wp-web-scraper' ); ?></a> ·
                     <a href="#" class="wpws-shortcode-example" data-shortcode="<?php echo esc_attr( '[wpws url="https://jsonplaceholder.typicode.com/users" query="$.*.name" query_type="jsonpath" glue=", "]' ); ?>"><?php _e( 'JSONPath list', 'wp-web-scraper' ); ?></a> ·
                     <a href="#" class="wpws-shortcode-example" data-shortcode="<?php echo esc_attr( '[wpws_atom_links url="https://feeds.bbci.co.uk/news/rss.xml" extension="jpg"]' ); ?>"><?php _e( 'RSS image links', 'wp-web-scraper' ); ?></a> ·
-                    <a href="#" class="wpws-shortcode-example" data-shortcode="<?php echo esc_attr( '[wpws_atom_zip_links url="https://oss.uredjenazemlja.hr/oss/public/atom/atom_feed.xml" extension="zip"]' ); ?>"><?php _e( 'Atom .zip links', 'wp-web-scraper' ); ?></a>
+                    <a href="#" class="wpws-shortcode-example" data-shortcode="<?php echo esc_attr( '[wpws_atom_zip_links url="https://example.com/atom_feed.xml" extension="zip"]' ); ?>"><?php _e( 'Atom .zip links', 'wp-web-scraper' ); ?></a>
                   </p>
                     <table class="form-table">
                         <tbody>
@@ -438,7 +438,7 @@
                         <li><code>callback="wpws_drop_rows:2"</code> / <code>callback="wpws_keep_rows:1_3-5"</code> – same for rows</li>
                     </ul>
                     <pre><code>[wpws url="https://www.w3schools.com/html/html_tables.asp" query="#customers" callback="wpws_drop_columns:2"]</code></pre>
-                    <p>Also available: <code>wpws_keep_first_3_columns</code> … <code>_10_columns</code>, <code>wpws_keep_first_N_rows</code>, combos like <code>wpws_keep_4_cols_5_rows</code>, and <code>wpws_keep_mobile_table_columns</code> (keeps columns 1, 2, 3, 4, 10).</p>
+                    <p><em>Deprecated but still working:</em> <code>wpws_keep_first_N_columns</code>, <code>wpws_keep_first_N_rows</code> and combos like <code>wpws_keep_4_cols_5_rows</code> — prefer <code>wpws_keep_columns:1-N</code> / <code>wpws_keep_rows:1-N</code>.</p>
                     <div class="info">
                         <strong>Tip:</strong> Tables with merged cells (<code>colspan</code>/<code>rowspan</code>) may not line up by position — prefer <code>wpws_keep_columns</code> with an explicit list.
                     </div>

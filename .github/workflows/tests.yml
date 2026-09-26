@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  phpunit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.1', '8.4']
+    name: PHP ${{ matrix.php }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, libxml, json
+          tools: phpunit:9.6
+          coverage: none
+
+      - name: Lint
+        run: find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l > /dev/null
+
+      - name: Composer lock matches composer.json
+        run: composer validate --no-check-publish
+
+      # vendor/ is committed on purpose (the plugin must run without Composer),
+      # so the suite runs against exactly what ships.
+      - name: PHPUnit
+        run: phpunit

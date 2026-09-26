@@ -24,6 +24,19 @@ then activate **WP WS Reborn 2026** under Plugins. Configure it under
 See [`readme.txt`](readme.txt) for the full changelog, and the in-plugin **Help** tab
 or [`help-files/html/wpws-guide.html`](help-files/html/wpws-guide.html) for the complete guide.
 
+## Development
+
+Requires PHP 7.4+. `vendor/` is committed so the plugin runs without Composer; after changing
+dependencies run `composer install --no-dev` and commit `vendor/`.
+
+Unit tests (no WordPress needed — `tests/bootstrap.php` stubs the few WP functions used):
+
+```sh
+phpunit        # PHPUnit 9.6
+```
+
+CI runs the suite on PHP 7.4, 8.1 and 8.4 for every push and pull request.
+
 ## License
 
 GPLv2 or later, same as the original plugin.

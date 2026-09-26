@@ -1,7 +1,7 @@
 <?php
 
 require_once __DIR__ . '/vendor/autoload.php';
-use Symfony\Component\CssSelector\CssSelector;
+use Symfony\Component\CssSelector\CssSelectorConverter;
 
 class WP_Web_Scraper_Parser {
 	
@@ -27,15 +27,30 @@ class WP_Web_Scraper_Parser {
 		
 	}
 	
+	/**
+	 * Convert a CSS selector to XPath (HTML mode: case-insensitive tag names).
+	 * Converter is reused — building it is the expensive part.
+	 *
+	 * @param string $selector CSS selector.
+	 * @return string XPath expression.
+	 */
+	public static function css_to_xpath( $selector ) {
+		static $converter = null;
+		if ( $converter === null ) {
+			$converter = new CssSelectorConverter( true );
+		}
+		return $converter->toXPath( $selector );
+	}
+
 	public function parse_selector( $selector ){
 		
 		$this->selector = $selector;
 		try {
 			$libxml_previous_state = libxml_use_internal_errors(true);
-			$this->xpath = CssSelector::toXPath( $selector );
+			$this->xpath = self::css_to_xpath( $selector );
 			libxml_clear_errors();
 			libxml_use_internal_errors($libxml_previous_state);
-		} catch (Exception $e) {
+		} catch (\Throwable $e) {
 			$this->error = 'Invalid CSS selector';
 		}
 		
@@ -108,10 +123,10 @@ class WP_Web_Scraper_Parser {
 		$this->selector = $selector;
 		try {
 			$libxml_previous_state = libxml_use_internal_errors(true);
-			$this->xpath = CssSelector::toXPath( $selector );
+			$this->xpath = self::css_to_xpath( $selector );
 			libxml_clear_errors();
 			libxml_use_internal_errors($libxml_previous_state);
-		} catch (Exception $e) {
+		} catch (\Throwable $e) {
             $this->xpath = null;
 		}
 		

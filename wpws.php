@@ -2,11 +2,16 @@
 
 /*
 Plugin Name: WP WS Reborn 2026
-Plugin URI: http://wp-ws.net/
+Plugin URI: https://github.com/dvadesetpet-glitch/wp-web-scrapper
 Description: Web scraper for WordPress. Display realtime data from any website in posts, pages or sidebar. Fork of WP Web Scraper with feed link shortcodes (wpws_atom_links, wpws_atom_zip_links).
-Version: 1.2
+Version: 1.3
+Requires at least: 5.0
+Requires PHP: 7.4
 Author: Akshay Raje (original), Reborn 2026
-Author URI: http://webdlabs.com/
+Author URI: https://github.com/dvadesetpet-glitch/wp-web-scrapper
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: wp-web-scraper
 */
 
 // Make sure we don't expose any info if called directly. Silence is golden.
@@ -16,7 +21,7 @@ if (!function_exists('add_action'))
 define('WPWS__PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPWS__PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPWS__PLUGIN_FILE', plugin_basename(__FILE__));
-define('WPWS__VERSION', '1.2');
+define('WPWS__VERSION', '1.3');
 
 require_once( WPWS__PLUGIN_DIR . 'class.wpws-security.php' );
 require_once( WPWS__PLUGIN_DIR . 'class.wpws.php' );
@@ -64,6 +69,15 @@ if ( !function_exists('wpws_keep_first_n_rows') ) {
     function wpws_keep_first_n_rows($html, $num_rows = 3) { return wpws_filter_table($html, 0, $num_rows); }
 }
 
+// ---------------------------------------------------------------------------
+// DEPRECATED named shortcuts — kept only so existing shortcodes keep working.
+// Use the parameterised helpers instead:
+//   wpws_keep_first_4_columns  →  callback="wpws_keep_columns:1-4"
+//   wpws_keep_first_5_rows     →  callback="wpws_keep_rows:1-5"
+//   wpws_keep_4_cols_3_rows    →  callback="wpws_filter_table_advanced:1-4,1-3"
+// They will be removed in a future major version.
+// ---------------------------------------------------------------------------
+
 // Named column callbacks (callback="wpws_keep_first_N_columns")
 if ( !function_exists('wpws_keep_first_3_columns') )  { function wpws_keep_first_3_columns($h)  { return wpws_keep_first_n_columns($h, 3);  } }
 if ( !function_exists('wpws_keep_first_4_columns') )  { function wpws_keep_first_4_columns($h)  { return wpws_keep_first_n_columns($h, 4);  } }
@@ -94,21 +108,6 @@ if ( !function_exists('wpws_keep_4_cols_4_rows') ) { function wpws_keep_4_cols_4
 if ( !function_exists('wpws_keep_5_cols_3_rows') ) { function wpws_keep_5_cols_3_rows($h) { return wpws_filter_table($h, 5, 3); } }
 if ( !function_exists('wpws_keep_5_cols_4_rows') ) { function wpws_keep_5_cols_4_rows($h) { return wpws_filter_table($h, 5, 4); } }
 if ( !function_exists('wpws_keep_5_cols_5_rows') ) { function wpws_keep_5_cols_5_rows($h) { return wpws_filter_table($h, 5, 5); } }
-
-/**
- * Helper function to keep only mobile table columns (like ksz-zagreb.hr mobile view)
- * Keeps: #, Klub, Pob, Por, Bod (columns 1, 2, 3, 4, and 10)
- * Usage: callback="wpws_keep_mobile_table_columns"
- * 
- * @param string $html HTML content containing table(s)
- * @return string Modified HTML with only mobile columns
- */
-if ( !function_exists('wpws_keep_mobile_table_columns') ) {
-    function wpws_keep_mobile_table_columns($html) {
-        // Use new advanced filtering function
-        return wpws_filter_table_advanced($html, '1_2_3_4_10', '');
-    }
-}
 
 // ============================================
 // ADVANCED FLEXIBLE TABLE FILTERING
@@ -394,12 +393,20 @@ if ( !function_exists('wpws_drop_rows') ) {
 /**
  * Bold specific words in HTML content
  * 
- * @param string|array $html HTML content (string or array for callback_raw)
- * @param string|array $words Words to bold (comma-separated string or array)
+ * Usage: callback="wpws_bold_words:Word1,Word2". The parameterised-callback
+ * syntax passes each comma-separated word as a separate argument, so all of
+ * them are collected here (previously only the first word was bolded).
+ *
+ * @param string|array $html     HTML content (string or array for callback_raw)
+ * @param string|array $words    Words to bold (comma-separated string or array)
+ * @param string       ...$more  Further words (from "name:a,b,c" callbacks)
  * @return string|array Modified HTML
  */
 if ( !function_exists('wpws_bold_words') ) {
-    function wpws_bold_words($html, $words = '') {
+    function wpws_bold_words($html, $words = '', ...$more) {
+        if (!empty($more)) {
+            $words = array_merge(is_array($words) ? $words : explode(',', (string) $words), $more);
+        }
         // Handle array input (from callback_raw)
         if (is_array($html)) {
             $result = array();
@@ -436,7 +443,7 @@ if ( !function_exists('wpws_bold_words') ) {
         $escaped_words = array_map('preg_quote', $words, array_fill(0, count($words), '/'));
         
         // Create regex pattern to match whole words only (case-insensitive)
-        // This ensures we don't match partial words (e.g., "Gorica" won't match "Goricanski")
+        // This ensures we don't match partial words (e.g., "Zagreb" won't match "Zagrebački")
         $pattern = '/\b(' . implode('|', $escaped_words) . ')\b/iu';
         
         // Replace with bold version, preserving original case
@@ -445,15 +452,5 @@ if ( !function_exists('wpws_bold_words') ) {
         }, $html);
         
         return $html;
-    }
-}
-
-/**
- * Bold specific words - wrapper for common use case
- * Usage: callback="wpws_bold_gorica"
- */
-if ( !function_exists('wpws_bold_gorica') ) {
-    function wpws_bold_gorica($html) {
-        return wpws_bold_words($html, 'Gorica');
     }
 }

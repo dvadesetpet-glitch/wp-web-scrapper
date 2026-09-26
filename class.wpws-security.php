@@ -29,7 +29,7 @@ class WP_Web_Scraper_Security {
 		'wpws_filter_table', 'wpws_filter_table_advanced', 'wpws_filter_table_exclude',
 		'wpws_keep_first_n_columns', 'wpws_keep_first_n_rows',
 		'wpws_keep_columns', 'wpws_drop_columns', 'wpws_keep_rows', 'wpws_drop_rows',
-		'wpws_keep_mobile_table_columns', 'wpws_bold_words', 'wpws_bold_gorica',
+		'wpws_bold_words',
 		'wpws_keep_3_cols_3_rows', 'wpws_keep_4_cols_3_rows', 'wpws_keep_3_cols_5_rows',
 		'wpws_keep_4_cols_5_rows', 'wpws_keep_3_cols_4_rows', 'wpws_keep_4_cols_4_rows',
 		'wpws_keep_5_cols_3_rows', 'wpws_keep_5_cols_4_rows', 'wpws_keep_5_cols_5_rows',
@@ -343,8 +343,10 @@ class WP_Web_Scraper_Security {
 			return false;
 		}
 		
-		$bytes = (int) $mask / 8;
-		$bits = (int) $mask % 8;
+		// intdiv: "(int) $mask / 8" cast before dividing, yielding a float
+		// string offset (deprecated since PHP 8.1) for masks like /7 or /10.
+		$bytes = intdiv( (int) $mask, 8 );
+		$bits  = (int) $mask % 8;
 		
 		$ip_bytes = substr( $ip_bin, 0, $bytes );
 		$subnet_bytes = substr( $subnet_bin, 0, $bytes );

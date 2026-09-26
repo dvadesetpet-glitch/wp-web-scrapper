@@ -638,8 +638,6 @@ class WP_Web_Scraper {
 
 				if ( $wpws_parser->error !== null ) {
 					self::$error = 'Error parsing: ' . $wpws_parser->error;
-				} elseif ( version_compare( PHP_VERSION, '5.3.3', '<' ) ) {
-					self::$error = 'Error parsing: PHP version 5.3.3 or greater is required for parsing';
 				} else {
 					$content     = $wpws_parser->result;
 					self::$count = (int) $wpws_parser->count;

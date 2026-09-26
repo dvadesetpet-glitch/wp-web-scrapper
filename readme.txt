@@ -4,7 +4,7 @@ Tags: web scraping, css selector, xpath, regex, realtime, shortcode, atom, rss, 
 Requires at least: 5.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.2
+Stable tag: 1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -21,17 +21,26 @@ Usage examples:
 
 * `[wpws url="https://example.com" query="#content"]` – classic scraper
 * `[wpws_atom_links url="http://rss.cnn.com/rss/cnn_topstories.rss" extension="jpg"]` – list of image URLs from RSS
-* `[wpws_atom_zip_links url="https://oss..../atom_feed.xml" extension="zip"]` – list of .zip links from Atom
+* `[wpws_atom_zip_links url="https://example.com/atom_feed.xml" extension="zip"]` – list of .zip links from Atom
 
-Original plugin: [WP Web Scraper](http://wp-ws.net/). Original readme and full changelog are in the `NEPOTREBNO` folder.
+Based on the original [WP Web Scraper](https://wordpress.org/plugins/wp-web-scrapper/) by Akshay Raje (GPLv2).
 
 == Installation ==
 
-1. Upload the plugin folder (e.g. `Wp-Ws-Rebirth-2026`) to `/wp-content/plugins/`
+1. Upload the plugin folder (e.g. `wp-ws-reborn-2026`) to `/wp-content/plugins/`
 2. Activate **WP WS Reborn 2026** in the Plugins menu
-3. Configure defaults under Settings → WP Web Scraper; use Sandbox to test shortcodes
+3. Configure defaults under Settings → WP WS Reborn 2026; use the Sandbox tab to test shortcodes
 
 == Changelog ==
+
+= 1.3 =
+* Dependencies: symfony/css-selector 2.5.5 (2014) → 5.4 (LTS line that still supports PHP 7.4). Removes the PHP 8.4 deprecation notices ("implicitly marking parameter as nullable", "strtolower(): Passing null"). Parser now uses CssSelectorConverter and catches all Throwables from invalid selectors.
+* Fix: `callback="wpws_bold_words:A,B"` now bolds every listed word (previously only the first).
+* Fix: IPv6 SSRF range check used a float string offset for masks like /7 and /10 (deprecated since PHP 8.1, an error in PHP 9); now uses intdiv(). Results were already correct.
+* Removed site-specific helpers `wpws_keep_mobile_table_columns` and `wpws_bold_gorica`. **Breaking** for shortcodes that use them: switch to `wpws_keep_columns:1_2_3_4_10` / `wpws_bold_words:Gorica`, or re-add them from your theme/mu-plugin (and register them via `wpws_allowed_callbacks`).
+* Deprecated (still working): fixed-name shortcuts `wpws_keep_first_N_columns`, `wpws_keep_first_N_rows`, `wpws_keep_X_cols_Y_rows`. Use the parameterised `wpws_keep_columns` / `wpws_keep_rows` / `wpws_filter_table_advanced`.
+* Cleanup: removed dead PHP 5.3.3 check; plugin header now declares Requires PHP / Requires at least / License / Text Domain; Plugin/Author URI point to this repository; readme install steps corrected.
+* Dev: PHPUnit test suite (table specs, JSONPath, SSRF/IP ranges, auth profiles, callback allow-list, bold words) and GitHub Actions CI on PHP 7.4 and 8.4.
 
 = 1.2 =
 * Security (critical): AJAX lazy-load (`ajax="1"`) no longer accepts URL, query or arguments from the browser. The placeholder carries only an opaque, HMAC-derived job ID and the parameters stay server-side, so `admin-ajax.php?action=wpws_scrape` can no longer be used as an open proxy by anonymous visitors. The nonce was dropped from this endpoint (it protected nothing and broke lazy-loading on full-page-cached pages once expired).
