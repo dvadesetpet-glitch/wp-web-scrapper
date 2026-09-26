@@ -1,122 +1,86 @@
-=== WP Web Scraper ===
-Contributors: akshay_raje, WisdmLabs
-Donate link: https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=akshay.raje@gmail.com&item_name=Donation+for+WP+Web+Scraper
-Tags: web scraping, curl, css selector, xpath, regex, realtime, post, sidebar, page, stock market, html, import
-Requires at least: 2.8
-Tested up to: 4.1
-Stable tag: 3.5
+=== WP WS Reborn 2026 ===
+Contributors: akshay_raje (original), Reborn 2026
+Tags: web scraping, css selector, xpath, regex, realtime, shortcode, atom, rss, feed links
+Requires at least: 5.0
+Tested up to: 6.8
+Requires PHP: 7.4
+Stable tag: 1.4
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-An easy to implement web scraper for WordPress. Display realtime data from any websites directly into your posts, pages or sidebar.
+Web scraper for WordPress. Fork of WP Web Scraper with feed link shortcodes. Display realtime data from any website in posts, pages or sidebar.
 
 == Description ==
 
-An easy to implement web scraper for WordPress. This can be used to display realtime data from any websites directly into your posts, pages or sidebar. Use this to include realtime stock quotes, cricket or soccer scores or any other generic content. Features include:
+**WP WS Reborn 2026** (wp-ws-reborn2026) is a fork of WP Web Scraper. It keeps all original [wpws] shortcode and template tag features (CSS selector, XPath, regex, caching, callbacks, etc.) and adds:
 
-1. Scrap output can be displayed thru custom template tag, shortcode in page, post and sidebar (through a text widget).
-1. Configurable caching of scraped data. Cache timeout in minutes can be defined in minutes for every scrap.
-1. Configurable Useragent for your scraper can be set for every scrap.
-1. Configurable default settings like enabling, useragent, timeout, caching, error handling.
-1. [Multiple ways to query content](http://wp-ws.net/docs/query/) - CSS Selector, XPath or Regex.
-1. A wide range of [arguments for parsing](http://wp-ws.net/docs/arguments-api/) content.
-1. Option to pass post arguments to a URL to be scraped.
-1. Dynamic conversion of scrap to specified character encoding to scrap data from a site using different charset.
-1. Create scrap pages on the fly using [dynamic generation of URLs](http://wp-ws.net/docs/dynamic-url-headers/) to scrap or post arguments based on your page's get or post arguments.
-1. [Callback function](http://wp-ws.net/docs/callback-functions/) for advanced parsing of scraped data.
+* **wpws_atom_links** – Extract http(s) links ending with a given extension from any Atom/RSS feed (e.g. images from CNN RSS: `extension="jpg"`, or zip links from Atom: `extension="zip"`). Uses regex on raw feed; no DOM/namespace issues.
+* **wpws_atom_zip_links** – Extract links by extension from Atom/RSS using DOM (alternative for Atom feeds with `<link href="...">`).
 
-Check the the official website [wp-ws.net](http://wp-ws.net/) for [documentation](http://wp-ws.net/docs/), browse through [examples](http://wp-ws.net/examples/), or try [paid support](http://wp-ws.net/support/) for crafting a perfectly optimized web scrape.
+Usage examples:
+
+* `[wpws url="https://example.com" query="#content"]` – classic scraper
+* `[wpws_atom_links url="http://rss.cnn.com/rss/cnn_topstories.rss" extension="jpg"]` – list of image URLs from RSS
+* `[wpws_atom_zip_links url="https://example.com/atom_feed.xml" extension="zip"]` – list of .zip links from Atom
+
+Based on the original [WP Web Scraper](https://wordpress.org/plugins/wp-web-scrapper/) by Akshay Raje (GPLv2).
 
 == Installation ==
 
-1. Upload folder `wp-web-scrapper` to the `/wp-content/plugins/` directory
-1. Activate the plugin through the 'Plugins' menu in WordPress
-1. [Usage instructions for WP Web Scraper](http://wp-ws.net/faqs/how-to-use-wp-web-scraper/)
-
-Mode details on this on the [FAQs](http://wp-ws.net/faqs/) page
-
-== Frequently Asked Questions ==
-
-* [What is web scraping? Why do I need it in WordPress?](http://wp-ws.net/faqs/what-is-web-scraping-needed-in-wordpress/)
-* [How to use WP Web Scraper?](http://wp-ws.net/faqs/how-to-use-wp-web-scraper/)
-* [How to optimize performance?](http://wp-ws.net/faqs/how-to-optimize-performance/)
-* [Minimum requirements & dependencies](http://wp-ws.net/faqs/minimum-requirements-dependencies/)
-* [Posting external content as Posts or Pages](http://wp-ws.net/faqs/posting-external-content-as-posts-or-pages/)
-
-== Documentation ==
-
-* [Arguments API](http://wp-ws.net/docs/arguments-api/)
-* [Query - CSS Selectors, XPath and Regex](http://wp-ws.net/docs/query/)
-* [Dynamic URL and headers](http://wp-ws.net/docs/dynamic-url-headers/)
-* [Callback Functions](http://wp-ws.net/docs/callback-functions/)
-
-== Examples ==
-
-[Example code](http://wp-ws.net/examples/) for some common use cases of the plugin
+1. Upload the plugin folder (e.g. `wp-ws-reborn-2026`) to `/wp-content/plugins/`
+2. Activate **WP WS Reborn 2026** in the Plugins menu
+3. Configure defaults under Settings → WP WS Reborn 2026; use the Sandbox tab to test shortcodes
 
 == Changelog ==
 
-= 3.5 =
-* Bug fix: Post request
-* Bug fix: gt, lt arguments
+= 1.4 =
+* Security: the admin Sandbox renders scraped HTML in a fully sandboxed iframe (plus an escaped source view). Previously the remote page's HTML was echoed into wp-admin, so with "Sanitize HTML Output" off a tested site could run JavaScript in the administrator's session.
+* Security: error messages and the debug comment are shown only to users who can edit posts (filter `wpws_show_errors`); visitors no longer see HTTP codes, blocked hosts or rate-limit notices. Errors are escaped; custom `on_error` text goes through wp_kses_post. `[wpws_atom_*]` diagnostic HTML comments follow the same rule.
+* Security: shortcodes and blocks run only in content whose author has `edit_others_posts` (filter `wpws_required_capability`); previews and block-editor renders also check the current user. Contributors can no longer use the site to fetch arbitrary URLs. **Breaking** for existing posts by Authors/Contributors that use the scraper.
+* Security: stored auth-profile secrets are never sent to the browser; the settings field shows `********` and keeps the saved value unless you replace it.
+* Performance: the cache stores one slim, gzip-compressed entry per request instead of the full response object twice (main + 7-day stale copy, with the body duplicated inside the object). Old v1 cache rows are removed automatically on upgrade.
+* Performance: stampede protection — when an entry expires only one request refreshes it (atomic lock, crash-safe takeover); concurrent visitors get the previous copy instead of all hitting the remote site and the rate limit.
+* Feature: `post_body` (clear name for the old `headers` argument, which is really a POST body and still works) and `request_headers` for actual HTTP request headers.
+* Fix: HTML validation no longer rejects normal pages — void elements (`<img>`, `<br>`, `<meta>`…) were counted as nesting (pages with >1000 images failed), and any single line over 100 KB (all minified HTML/JSON) was rejected. Real deep nesting is still blocked.
+* Compatibility: bundled symfony/css-selector is namespace-prefixed with Strauss (`WPWS\Vendor\…`) so it cannot clash with another plugin's copy.
+* New: `uninstall.php` removes options, cache, AJAX jobs, locks, rate-limit counters and scheduled refreshes (multisite-aware).
 
-= 3.4 =
-* Added scrap importer
-* replace_query and replace_with now accepted specially formatted array arguments
+= 1.3 =
+* Dependencies: symfony/css-selector 2.5.5 (2014) → 5.4 (LTS line that still supports PHP 7.4). Removes the PHP 8.4 deprecation notices ("implicitly marking parameter as nullable", "strtolower(): Passing null"). Parser now uses CssSelectorConverter and catches all Throwables from invalid selectors.
+* Fix: `callback="wpws_bold_words:A,B"` now bolds every listed word (previously only the first).
+* Fix: IPv6 SSRF range check used a float string offset for masks like /7 and /10 (deprecated since PHP 8.1, an error in PHP 9); now uses intdiv(). Results were already correct.
+* Removed two site-specific helper callbacks. **Breaking** for shortcodes that used them: switch to the generic `wpws_keep_columns:<spec>` / `wpws_bold_words:<words>`, or re-add them from your theme/mu-plugin (and register them via `wpws_allowed_callbacks`).
+* Deprecated (still working): fixed-name shortcuts `wpws_keep_first_N_columns`, `wpws_keep_first_N_rows`, `wpws_keep_X_cols_Y_rows`. Use the parameterised `wpws_keep_columns` / `wpws_keep_rows` / `wpws_filter_table_advanced`.
+* Cleanup: removed dead PHP 5.3.3 check; plugin header now declares Requires PHP / Requires at least / License / Text Domain; Plugin/Author URI point to this repository; readme install steps corrected.
+* Dev: PHPUnit test suite (table specs, JSONPath, SSRF/IP ranges, auth profiles, callback allow-list, bold words) and GitHub Actions CI on PHP 7.4 and 8.4.
 
-= 3.3 =
-* Basehref bug fix
+= 1.2 =
+* Security (critical): AJAX lazy-load (`ajax="1"`) no longer accepts URL, query or arguments from the browser. The placeholder carries only an opaque, HMAC-derived job ID and the parameters stay server-side, so `admin-ajax.php?action=wpws_scrape` can no longer be used as an open proxy by anonymous visitors. The nonce was dropped from this endpoint (it protected nothing and broke lazy-loading on full-page-cached pages once expired).
+* Security (critical): credentials (`auth_user`, `auth_pass`, `auth_token`) and `headers` are no longer written into the public page HTML of AJAX placeholders.
+* Feature: authentication profiles (Settings → Authentication profiles; `auth_profile="name"`) with bearer, basic and custom-header types, plus a `wpws_auth_profiles` filter for wp-config/env secrets. The block editor no longer stores credentials; blocks that still contain them show a warning and a one-click remove. Legacy inline credentials keep working.
+* Security: DNS pinning — requests connect (via CURLOPT_RESOLVE) to the IP that passed the SSRF check, closing the DNS-rebinding window. Hosts that do not resolve are now blocked.
+* Security: callback allow-list is now explicit. The "any function named wpws_*" wildcard is removed (it also matched fetch functions such as `wpws_get_content`). **Breaking:** custom `wpws_*` callbacks must be registered via the `wpws_allowed_callbacks` filter.
+* Security: settings are sanitized on save (`register_setting` sanitize callback): numeric ranges, domain lists, auth profile syntax. Checkboxes are always stored as 0/1 — fixes "Sanitize HTML Output" silently staying on after being unchecked.
+* Fix: rate limiting is now atomic (no lost updates under concurrent requests) and counts only real outgoing fetches per remote host. Previously every page view — including cache hits — counted, so busy pages could hit the limit and render nothing.
+* Fix: `memory_limit = -1` (unlimited) no longer makes every response fail with "Content too large".
 
-= 3.2 =
-* Documentation website change
+= 1.1 =
+* Security: SSRF protection now re-validates every redirect hop (blocks public→internal redirects, e.g. cloud metadata), resolves both IPv4 (A) and IPv6 (AAAA) records, and blocks hex/octal/decimal integer-IP encodings.
+* Security: `debug` now defaults to OFF (the debug HTML comment was emitted into public page source and could leak auth credentials); auth values are masked in any debug output.
+* Security: callbacks are now allow-listed (filter `wpws_allowed_callbacks`) instead of blocked via an incomplete blacklist; arbitrary one-arg PHP functions can no longer be invoked from shortcodes.
+* Security: XML/HTML parsing hardened with `LIBXML_NONET`; response download capped via `limit_response_size`.
+* Security: admin Sandbox/Import controllers sanitize input and build an explicit post array instead of passing raw `$_POST` to `wp_insert_post()`.
+* Fix: request timeout floored at 5s and activation default raised to 10s (the 2s default caused spurious failures); fixed `replace_xpath()` document-fragment reuse; fixed `ip_in_range()` /0 edge case; aligned admin text domain to `wp-web-scraper`.
+* Fix: `[wpws_atom_zip_links]` no longer ships a hardcoded default URL (url is now required).
+* Cleanup: deduplicated table-filter logic, removed dead code, removed `@` error-suppression in the settings view.
+* UX: Sandbox debug tab now shows match count, fetch time and errors; richer, working example gallery (CSS/XPath/Regex/JSONPath/tables) plus ready-made shortcode examples.
+* Feature: parameterised callbacks via "name:args" syntax (e.g. `callback="wpws_drop_columns:4"`). New table helpers `wpws_keep_columns`, `wpws_drop_columns`, `wpws_keep_rows`, `wpws_drop_rows` (1-based specs like `4`, `4_7`, `5-8`) — drop specific columns/rows and keep the rest without listing every keeper.
+* Fix: query type for validation is read from the normalised args, so regex/XPath/JSONPath queries containing `<`/`>` validate correctly when args are passed as a query-string (e.g. the Sandbox).
+* Docs: complete guide (help-files) and in-plugin Help tab + Quick Help updated for all new features — JSONPath, authentication, mobile emulation, AJAX/background refresh, table keep/drop helpers, parameterised callbacks, feed shortcodes, Gutenberg block, and the security/allow-list model.
 
-= 3.1 =
-* Bug fix: Minor bug fixes.
-
-= 3.0 =
-* Enhancement: Complete code rewrite, uses PHP DOM directly for faster processing
-* Enhancement: Sandbox to test and debug
-* Deprecation: Dropped `removetags`
-* Changes: Changes in arguments
-
-= 2.8 =
-* Enhancement: Migrated caching to the Transients API.
-* Enhancement: Clear and find / replace now supports selectors.
-* Enhancement: Cleaner code - faster processing.
-* Enhancement: More debugging data including processing time.
-* Deprecation: Modules are deprecated in support of callback functions.
-
-= 2.7 =
-* Enhancement: Added `callback` for flexible as well as advanced parsing.
-* Bug fix: Fixed the issue of usage within widget.
-
-= 2.6 =
-* Enhancement: Added `removetags` to remove certain tags and content from scrap.
-* Bug fix: Retains http-cache and modules on upgrade.
-
-= 2.5 =
-* Bug fix: Patched a major security issue related to useragent string settings.
-
-= 2.4 =
-* Bug fix: Added xpathdecode to handle complex xpath queries in shortcode.
-
-= 2.3 =
-* Enhancement: Added support for xpaths.
-* Enhancement: Uses builtin WP_HTTP classes instead of raw cURL or Fopen.
-* Enhancement: Complete overhaul of code, architecture and documentation.
-* Enhancement: Reversed to filebased cache instead of MySQL tables.
-
-= 2.2 =
-* Enhancement: Introduction of special variable `___QUERY_STRING___` for dynamic URLs.
-* Enhancement: Upgraded the underlying phpQuery library to single file version.
-
-= 2.1 =
-* Enhancement: Option to turn off the debug information displayed as html comment.
-
-= 2.0 =
-* Milestone release: Complete overhaul of code, architecture and documentation.
-* Bug fix: Multiple bug fixes addressed.
-
-== Upgrade Notice ==
-
-= 3.5 =
-* Bug fix: Post request
-* Bug fix: gt, lt arguments
+= 1.0 =
+* Initial release as WP WS Reborn 2026
+* Plugin name: WP WS Reborn 2026 (wp-ws-reborn2026)
+* Shortcodes: [wpws] (unchanged), [wpws_atom_links], [wpws_atom_zip_links]
+* Help: wpws_atom_links example in guide; Sandbox: “Fill form from shortcode” and “Clear” for shortcode field
+* Based on WP Web Scraper 4.0 codebase

@@ -1,0 +1,28 @@
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*~
+*.swp
+*.swo
+
+# Logs & temp
+*.log
+*.tmp
+*.bak
+
+# PHP / Composer
+# Dependencies ship namespace-prefixed in vendor-prefixed/ (committed, built by
+# Strauss). vendor/ is only a Composer work dir, except the hand-bundled phpuri.
+/vendor/*
+!/vendor/phpuri/
+.phpunit.result.cache
+/strauss.phar

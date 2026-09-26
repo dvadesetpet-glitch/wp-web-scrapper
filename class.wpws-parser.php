@@ -1,7 +1,10 @@
 <?php
 
-require_once 'vendor/autoload.php';
-use Symfony\Component\CssSelector\CssSelector;
+// Bundled dependencies are namespace-prefixed (WPWS\Vendor\…) with Strauss so
+// they cannot clash with a different symfony/css-selector loaded by another
+// plugin. Rebuild with: composer install --no-dev && php strauss.phar
+require_once __DIR__ . '/vendor-prefixed/autoload.php';
+use WPWS\Vendor\Symfony\Component\CssSelector\CssSelectorConverter;
 
 class WP_Web_Scraper_Parser {
 	
@@ -27,12 +30,30 @@ class WP_Web_Scraper_Parser {
 		
 	}
 	
+	/**
+	 * Convert a CSS selector to XPath (HTML mode: case-insensitive tag names).
+	 * Converter is reused — building it is the expensive part.
+	 *
+	 * @param string $selector CSS selector.
+	 * @return string XPath expression.
+	 */
+	public static function css_to_xpath( $selector ) {
+		static $converter = null;
+		if ( $converter === null ) {
+			$converter = new CssSelectorConverter( true );
+		}
+		return $converter->toXPath( $selector );
+	}
+
 	public function parse_selector( $selector ){
 		
 		$this->selector = $selector;
 		try {
-			@$this->xpath = CssSelector::toXPath( $selector );
-		} catch (Exception $e) {
+			$libxml_previous_state = libxml_use_internal_errors(true);
+			$this->xpath = self::css_to_xpath( $selector );
+			libxml_clear_errors();
+			libxml_use_internal_errors($libxml_previous_state);
+		} catch (\Throwable $e) {
 			$this->error = 'Invalid CSS selector';
 		}
 		
@@ -47,9 +68,15 @@ class WP_Web_Scraper_Parser {
 		
 		$this->xpath = $xpath;
 		$doc = new DOMDocument();
-		@$doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html);
-		$xpath = new DomXPath($doc);
-		@$elements = $xpath->query($this->xpath);
+		
+		// Suppress warnings for malformed HTML, but log errors in debug mode
+		$libxml_previous_state = libxml_use_internal_errors(true);
+		$doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html, LIBXML_NONET);
+		libxml_clear_errors();
+		libxml_use_internal_errors($libxml_previous_state);
+		
+		$xpath_obj = new DomXPath($doc);
+		$elements = $xpath_obj->query($this->xpath);
 		
 		$elements_html = array();
 		
@@ -73,7 +100,7 @@ class WP_Web_Scraper_Parser {
     public function parse_regex( $regex ){
       
         $this->regex = $regex;
-        @$preg_matches = preg_match_all($this->regex, $this->html, $elements, PREG_SET_ORDER);
+        $preg_matches = preg_match_all($this->regex, $this->html, $elements, PREG_SET_ORDER);
         
         $elements_html = array();
         
@@ -82,7 +109,7 @@ class WP_Web_Scraper_Parser {
 				$elements_html[] = trim($element[0]);
             if( !empty($elements_html) ){
                 $this->result = $elements_html;
-                $this->count = $elements->length;
+                $this->count = count($elements);
             } else {
                 $this->error = 'Query returned empty response';
             }
@@ -98,8 +125,11 @@ class WP_Web_Scraper_Parser {
 		
 		$this->selector = $selector;
 		try {
-			@$this->xpath = CssSelector::toXPath( $selector );
-		} catch (Exception $e) {
+			$libxml_previous_state = libxml_use_internal_errors(true);
+			$this->xpath = self::css_to_xpath( $selector );
+			libxml_clear_errors();
+			libxml_use_internal_errors($libxml_previous_state);
+		} catch (\Throwable $e) {
             $this->xpath = null;
 		}
 		
@@ -111,9 +141,15 @@ class WP_Web_Scraper_Parser {
         
         $this->xpath = $xpath;
         $doc = new DOMDocument();
-        @$doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html);
-        $xpath = new DomXPath($doc);
-        @$elements = $xpath->query($this->xpath);
+        
+        // Suppress warnings for malformed HTML
+        $libxml_previous_state = libxml_use_internal_errors(true);
+        $doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html, LIBXML_NONET);
+		libxml_clear_errors();
+		libxml_use_internal_errors($libxml_previous_state);
+		
+        $xpath_obj = new DomXPath($doc);
+        $elements = $xpath_obj->query($this->xpath);
         
         $elements_remove = array();
         $elements_replace = array();
@@ -124,13 +160,16 @@ class WP_Web_Scraper_Parser {
                     $elements_remove[] = $element;
                 foreach( $elements_remove as $element_remove )
                     $element_remove->parentNode->removeChild($element_remove);
-            } else {    
-                $with_element = $doc->createDocumentFragment();
+            } else {
                 foreach ($elements as $element)
-                    $elements_replace[] = $element; 
-                foreach( $elements_replace as $element_replace ){    
-                    $with_element->appendXML($with);
-                    $element_replace->parentNode->replaceChild($with_element, $element_replace);                      
+                    $elements_replace[] = $element;
+                foreach( $elements_replace as $element_replace ){
+                    // Build a fresh fragment per node; a fragment is emptied once
+                    // inserted, so it cannot be reused across iterations.
+                    $with_element = $doc->createDocumentFragment();
+                    if ( @$with_element->appendXML($with) === false )
+                        continue; // invalid replacement markup; leave node untouched
+                    $element_replace->parentNode->replaceChild($with_element, $element_replace);
                 }
             }
         }
@@ -141,17 +180,20 @@ class WP_Web_Scraper_Parser {
     
     public function basehref($base){
         
-        require_once 'vendor/phpuri/phpuri.php';
+        require_once __DIR__ . '/vendor/phpuri/phpuri.php';
         $doc = new DOMDocument();
-        @$doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html);   
+        
+        // Suppress warnings for malformed HTML
+        $libxml_previous_state = libxml_use_internal_errors(true);
+        $doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html, LIBXML_NONET);
+		libxml_clear_errors();
+		libxml_use_internal_errors($libxml_previous_state);   
         
         foreach ($doc->getElementsByTagName('*') as $item){
             if($item->getAttribute('href') != '')
                 $item->setAttribute('href', phpUri::parse($base)->join($item->getAttribute('href')));
-                //$item->setAttribute('href', $this->rel2abs($item->getAttribute('href'), $base));
             if($item->getAttribute('src') != '')
                 $item->setAttribute('src', phpUri::parse($base)->join($item->getAttribute('src')));
-                //$item->setAttribute('src', $this->rel2abs($item->getAttribute('src'), $base));            
         }
         
         return str_replace(array('<body>','</body>'), '', trim($doc->saveHTML($doc->getElementsByTagName('body')->item(0))));     
@@ -161,7 +203,12 @@ class WP_Web_Scraper_Parser {
     public function a_target($target){
         
         $doc = new DOMDocument();
-        @$doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html);   
+        
+        // Suppress warnings for malformed HTML
+        $libxml_previous_state = libxml_use_internal_errors(true);
+        $doc->loadHTML('<?xml encoding="'.$this->charset.'" ?>'.$this->html, LIBXML_NONET);
+		libxml_clear_errors();
+		libxml_use_internal_errors($libxml_previous_state);   
         
         foreach ($doc->getElementsByTagName('a') as $item)
             $item->setAttribute('target', $target);
@@ -170,31 +217,75 @@ class WP_Web_Scraper_Parser {
         
     }    
     
-    private function rel2abs($rel, $base) {
-        if (strpos($rel, "//") === 0) 
-            return $rel;
-        /* return if  already absolute URL */
-        if (parse_url($rel, PHP_URL_SCHEME) !== null)
-            return $rel;
-        /* queries and  anchors */
-        if ($rel[0] == '#' || $rel[0] == '?')
-            return $base . $rel;
-        /* parse base URL  and convert to local variables:
-          $scheme, $host,  $path */
-        extract(parse_url($base));
-        /* remove  non-directory element from path */
-        $path = preg_replace('#/[^/]*$#', '', $path);
-        /* destroy path if  relative url points to root */
-        if ($rel[0] == '/')
-            $path = '';
-        /* dirty absolute  URL */
-        $abs = "$host$path/$rel";
-        /* replace '//' or  '/./' or '/foo/../' with '/' */
-        $re = array('#(/.?/)#', '#/(?!..)[^/]+/../#');
-        for ($n = 1; $n > 0; $abs = preg_replace($re, '/', $abs, -1, $n));
-        /* absolute URL is  ready! */
-        $abs = str_replace('//','/', $abs); 
-        return $scheme . '://' . $abs;
-    }
+	/**
+	 * Parse a dot-notation JSONPath expression against $this->html (must be valid JSON).
+	 * Supports: named keys, numeric indices (negative OK), wildcard *.
+	 *
+	 * @param string $path Dot-notation path, e.g. "$.items.*.title" or "items.0.name".
+	 * @return array|null Result array of strings, or null on error.
+	 */
+	public function parse_jsonpath( $path ) {
+		$data = json_decode( $this->html, true );
+		if ( json_last_error() !== JSON_ERROR_NONE ) {
+			$this->error = 'Invalid JSON: ' . json_last_error_msg();
+			return null;
+		}
+
+		$path = trim( $path );
+		// Root-only: return entire document as one result
+		if ( $path === '' || $path === '$' || $path === '.' ) {
+			$val          = is_array( $data ) ? json_encode( $data, JSON_UNESCAPED_UNICODE ) : (string) $data;
+			$this->result = array( $val );
+			$this->count  = 1;
+			return $this->result;
+		}
+
+		// Strip leading $. or $
+		$path     = preg_replace( '/^\$\.?/', '', $path );
+		$segments = array_values( array_filter( explode( '.', $path ), 'strlen' ) );
+		$results  = self::_jsonpath_traverse( $data, $segments );
+
+		if ( empty( $results ) ) {
+			$this->error = 'Query returned empty response';
+			return null;
+		}
+
+		$this->result = array_map( function( $v ) {
+			return is_array( $v ) ? json_encode( $v, JSON_UNESCAPED_UNICODE ) : (string) $v;
+		}, $results );
+		$this->count = count( $this->result );
+		return $this->result;
+	}
+
+	private static function _jsonpath_traverse( $data, $segments ) {
+		if ( empty( $segments ) ) {
+			return array( $data );
+		}
+
+		$seg      = array_shift( $segments );
+		$results  = array();
+
+		// Wildcard: iterate every element
+		if ( $seg === '*' ) {
+			if ( ! is_array( $data ) ) return array();
+			foreach ( $data as $item ) {
+				$results = array_merge( $results, self::_jsonpath_traverse( $item, $segments ) );
+			}
+			return $results;
+		}
+
+		// Numeric index (supports negative)
+		if ( is_array( $data ) && preg_match( '/^-?\d+$/', $seg ) ) {
+			$idx  = (int) $seg;
+			$keys = array_keys( $data );
+			if ( $idx < 0 ) $idx = count( $keys ) + $idx;
+			if ( ! isset( $keys[ $idx ] ) ) return array();
+			return self::_jsonpath_traverse( $data[ $keys[ $idx ] ], $segments );
+		}
+
+		// Named key
+		if ( ! is_array( $data ) || ! array_key_exists( $seg, $data ) ) return array();
+		return self::_jsonpath_traverse( $data[ $seg ], $segments );
+	}
 
 }

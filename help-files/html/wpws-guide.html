@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WP WS Reborn 2026 – Complete Guide</title>
+<style>
+:root { --accent: #0073aa; --bg: #f5f5f5; --border: #ddd; --warn: #856404; --info: #0c5460; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; max-width: 800px; margin: 0 auto; padding: 1.5rem; color: #333; }
+h1 { border-bottom: 2px solid var(--accent); color: var(--accent); padding-bottom: 0.5rem; }
+h2 { color: var(--accent); margin-top: 2rem; scroll-margin-top: 1rem; }
+h3 { color: #333; margin-top: 1.5rem; }
+nav.toc { background: #f9f9f9; border: 1px solid var(--border); border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 2rem; }
+nav.toc h2 { margin-top: 0; font-size: 1.1rem; }
+nav.toc ul { list-style: none; padding-left: 0; margin: 0.5rem 0 0; }
+nav.toc li { margin: 0.35rem 0; }
+nav.toc a { color: var(--accent); text-decoration: none; }
+nav.toc a:hover { text-decoration: underline; }
+pre, .code { background: var(--bg); border-left: 4px solid var(--accent); padding: 0.75rem 1rem; overflow-x: auto; font-size: 0.9rem; position: relative; }
+code { background: #eee; padding: 0.15em 0.4em; border-radius: 3px; font-size: 0.9em; }
+pre code { background: none; padding: 0; }
+.block { margin-bottom: 1.5rem; padding: 1rem; background: #fafafa; border: 1px solid var(--border); border-radius: 4px; }
+.note { background: #fff3cd; border-left: 4px solid #ffc107; padding: 0.75rem 1rem; margin: 1rem 0; }
+.info { background: #d1ecf1; border-left: 4px solid #17a2b8; padding: 0.75rem 1rem; margin: 1rem 0; }
+ul.args { list-style: none; padding-left: 0; }
+ul.args li { margin: 0.4rem 0; padding-left: 1rem; border-left: 3px solid var(--accent); }
+.copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+}
+.copy-btn:active {
+  background: #e2f3ff;
+}
+</style>
+</head>
+<body>
+
+<h1>WP WS Reborn 2026 – Complete Guide</h1>
+<p>This page describes all plugin features, arguments, and examples. Use the table of contents to jump to a section.</p>
+
+<nav class="toc" aria-label="Table of contents">
+<h2 id="toc">Contents</h2>
+<ul>
+<li><a href="#overview">Overview</a></li>
+<li><a href="#basic-usage">Basic usage (shortcode &amp; template tag)</a></li>
+<li><a href="#query-types">Query types (CSS, XPath, Regex, JSONPath)</a></li>
+<li><a href="#request-args">Request arguments</a></li>
+<li><a href="#response-args">Response / output arguments</a></li>
+<li><a href="#filters">Filters: eq, gt, lt</a></li>
+<li><a href="#remove-replace">remove_query &amp; replace_query</a></li>
+<li><a href="#links">basehref &amp; a_target</a></li>
+<li><a href="#callbacks">Callbacks (callback, callback_raw)</a></li>
+<li><a href="#table-helpers">Table filtering helpers (keep/drop columns &amp; rows)</a></li>
+<li><a href="#auth">Authentication (basic, bearer)</a></li>
+<li><a href="#mobile">Mobile emulation</a></li>
+<li><a href="#ajax">AJAX lazy load &amp; background refresh</a></li>
+<li><a href="#dynamic-urls">Dynamic URLs</a></li>
+<li><a href="#on-error">on_error handling</a></li>
+<li><a href="#atom">Atom/RSS feed link shortcodes</a></li>
+<li><a href="#block">Gutenberg block</a></li>
+<li><a href="#security">Security &amp; allow-listed callbacks</a></li>
+<li><a href="#examples">Examples</a></li>
+<li><a href="#admin">Admin: Sandbox, Import, Help</a></li>
+<li><a href="#requirements">Requirements &amp; resources</a></li>
+</ul>
+</nav>
+
+<!-- OVERVIEW -->
+<section id="overview">
+<h2>Overview</h2>
+<p>WP WS Reborn 2026 fetches content from external URLs and displays it in posts, pages, or themes. You provide a <strong>URL</strong> and a <strong>query</strong> (CSS selector, XPath, or regex) to extract the parts you need. You can also strip ad blocks from the result using <code>remove_query</code> (e.g. <code>remove_query=".ads"</code> on article content). Most arguments are optional – when you use a query, only <code>url</code> and <code>query</code> are required.</p>
+</section>
+
+<!-- BASIC USAGE -->
+<section id="basic-usage">
+<h2>Basic usage</h2>
+<p><strong>Shortcode</strong> (posts, pages, widgets):</p>
+<pre><code>[wpws url="https://example.com" query="div.content"]</code></pre>
+<p><strong>Template tag</strong> (PHP in themes):</p>
+<pre><code>&lt;?php echo wpws_get_content('https://example.com', 'div.content'); ?&gt;</code></pre>
+<p>With optional arguments as array:</p>
+<pre><code>&lt;?php echo wpws_get_content('https://example.com', 'div.content', array('output' =&gt; 'text', 'cache' =&gt; 60)); ?&gt;</code></pre>
+</section>
+
+<!-- QUERY TYPES -->
+<section id="query-types">
+<h2>Query types</h2>
+<p>There are four ways to select content. The default is a CSS selector.</p>
+
+<h3>CSS selector (default)</h3>
+<p>Use <code>query_type="cssselector"</code> or omit it. Examples:</p>
+<ul class="args">
+<li><code>div.content</code> – divs with class <code>content</code></li>
+<li><code>#header</code> – element with id <code>header</code></li>
+<li><code>.sidebar</code> – elements with class <code>sidebar</code></li>
+<li><code>ul li</code> – list items inside <code>ul</code></li>
+<li><code>article h2.title</code> – h2 with class <code>title</code> inside <code>article</code></li>
+</ul>
+
+<h3>XPath</h3>
+<p>Use <code>query_type="xpath"</code>. Handy for XML/RSS. Examples:</p>
+<ul class="args">
+<li><code>//div[@class='content']</code></li>
+<li><code>//item/title</code> – RSS item titles</li>
+<li><code>//channel/item/title</code> – feed item titles</li>
+</ul>
+
+<h3>Regex</h3>
+<p>Use <code>query_type="regex"</code>. Example:</p>
+<pre><code>[wpws url="https://example.com" query="/&lt;h2&gt;(.*?)&lt;\/h2&gt;/" query_type="regex"]</code></pre>
+
+<h3>JSONPath (for JSON APIs)</h3>
+<p>Use <code>query_type="jsonpath"</code> when the source returns <strong>JSON</strong> (REST APIs, etc.). A simplified dot-notation path is supported: named keys, numeric indices (negative allowed), and the <code>*</code> wildcard. A leading <code>$.</code> or <code>$</code> is optional.</p>
+<ul class="args">
+<li><code>$.title</code> – the <code>title</code> field of an object</li>
+<li><code>$.0.name</code> – <code>name</code> of the first array element (<code>$.-1.name</code> = last)</li>
+<li><code>$.items.*.id</code> – the <code>id</code> of every element under <code>items</code></li>
+<li><code>$</code> (or empty) – the whole document as a JSON string</li>
+</ul>
+<pre><code>[wpws url="https://jsonplaceholder.typicode.com/users" query="$.*.email" query_type="jsonpath" glue=", "]</code></pre>
+<div class="info">Each match is returned as a string; objects/arrays are JSON-encoded. Combine with <code>glue</code>, <code>eq</code>, <code>gt</code>, <code>lt</code> just like the other query types.</div>
+</section>
+
+<!-- REQUEST ARGS -->
+<section id="request-args">
+<h2>Request arguments</h2>
+<ul class="args">
+<li><code>url</code> – <em>Required.</em> Full URL to scrape. Supports <a href="#dynamic-urls">dynamic placeholders</a>.</li>
+<li><code>cache</code> – How long to store the fetched page before requesting it again, in <strong>minutes</strong>. Default: 60. Use a higher value (e.g. 360, 1440) for rarely changing content to reduce external requests; use a lower value (e.g. 5, 15) for frequently updated content. Set to <code>0</code> to disable caching for that request.</li>
+<li><code>timeout</code> – Request timeout in seconds. Default: 10 (minimum enforced: 5).</li>
+<li><code>useragent</code> – Custom User-Agent header. Default: latest Chrome (desktop), e.g. <code>Chrome/131.0.0.0</code>.</li>
+<li><code>post_body</code> – POST body as a query string (switches the request to POST), e.g. <code>id=1&amp;key=val</code>. <code>headers</code> is the old, misleading name for the same thing and still works.</li>
+<li><code>request_headers</code> – extra HTTP request headers as a query string, e.g. <code>Accept=application/json&amp;X-Requested-With=XMLHttpRequest</code>. <code>Host</code>, <code>Content-Length</code> and other hop-by-hop headers are ignored; for credentials use <a href="#auth">auth_profile</a>.</li>
+<li><code>urldecode</code> – 1 or 0. Use 1 for url-encoded URLs (shortcode only). Default: 1.</li>
+<li><code>querydecode</code> – 1 or 0. Use 1 for url-encoded query (shortcode only). Default: 0.</li>
+</ul>
+<p>See also: <a href="#auth">authentication</a>, <a href="#mobile">mobile emulation</a>, and <a href="#ajax">AJAX / background refresh</a> arguments.</p>
+<div class="info">
+<strong>How caching works:</strong> The plugin stores each URL’s response in WordPress (Transients API). For the duration you set with <code>cache</code>, the same URL is not fetched again from the remote site – the stored copy is used instead. This speeds up your pages and reduces load on the target site. For high traffic or many shortcodes, using a <strong>cache plugin</strong> (object cache / persistent cache) is strongly recommended for better performance.
+</div>
+</section>
+
+<!-- RESPONSE ARGS -->
+<section id="response-args">
+<h2>Response / output arguments</h2>
+<ul class="args">
+<li><code>output</code> – <code>html</code> (default) or <code>text</code>. The <code>text</code> option strips all HTML tags.</li>
+<li><code>glue</code> – String used to join multiple results. Default: a newline.</li>
+<li><code>debug</code> – 1 or 0. When set to 1, adds a debug HTML comment (credentials masked) — only for logged-in users who can edit posts, never for visitors. Default: 0.</li>
+<li><code>on_error</code> – <code>error_show</code>, <code>error_hide</code>, or any string to display on failure. Default: <code>error_show</code>. See <a href="#on-error">on_error</a>.</li>
+</ul>
+</section>
+
+<!-- FILTERS -->
+<section id="filters">
+<h2>Filters: eq, gt, lt</h2>
+<p>Limit which matched elements are returned. Index is 0-based.</p>
+<ul class="args">
+<li><code>eq</code> – Single element: <code>first</code>, <code>last</code>, or number (e.g. <code>eq="3"</code>).</li>
+<li><code>lt</code> – Elements with index <strong>less than</strong> N (first N elements). E.g. <code>lt="10"</code> → indices 0–9.</li>
+<li><code>gt</code> – Elements with index <strong>greater than</strong> N (skip first N+1). E.g. <code>gt="2"</code> → from index 3 onward.</li>
+</ul>
+<p><strong>Combining gt and lt</strong> returns a range: <code>gt="2" lt="8"</code> returns indices 3, 4, 5, 6, 7.</p>
+<div class="block">
+<strong>Example – first 10 headings as text, separated by line breaks:</strong>
+<pre><code>[wpws url="https://www.w3schools.com/tags/tag_hn.asp" query="h2" output="text" lt="10" glue="&lt;br&gt;"]</code></pre>
+<p>Fetches the first 10 <code>&lt;h2&gt;</code> headings from the W3Schools HTML heading tags page.</p>
+</div>
+</section>
+
+<!-- REMOVE / REPLACE -->
+<section id="remove-replace">
+<h2>remove_query &amp; replace_query</h2>
+<p><strong>remove_query</strong> – Removes nodes matching the given query from the result. Typical use: strip ad blocks from an article (e.g. <code>remove_query=".ads"</code> or <code>.advertisement</code>). Use <code>remove_query_type</code> (cssselector, xpath, regex) if not CSS.</p>
+<div class="block">
+<strong>Example – article content without ad blocks:</strong>
+<pre><code>[wpws url="https://www.w3schools.com/html/html_intro.asp" query="#main" remove_query=".w3-sidebar"]</code></pre>
+<p>Fetches the main content from the W3Schools HTML intro page and removes the sidebar. To strip ad blocks on other sites, use <code>query="article"</code> (or the main content selector) and <code>remove_query=".ads"</code> or <code>remove_query=".advertisement"</code> – the exact class depends on the target site.</p>
+</div>
+<p><strong>replace_query</strong> / <strong>replace_with</strong> – Replaces matched content. <code>replace_with</code> is the replacement string; omit to remove.</p>
+<pre><code>[wpws url="https://example.com" query=".content" replace_query=".old" replace_with="&lt;span&gt;New&lt;/span&gt;"]</code></pre>
+</section>
+
+<!-- BASEHREF / A_TARGET -->
+<section id="links">
+<h2>basehref &amp; a_target</h2>
+<ul class="args">
+<li><code>basehref</code> – Converts relative links to absolute. Use <code>1</code> (source URL as base), <code>0</code> (no change), or a full URL.</li>
+<li><code>a_target</code> – Sets <code>target</code> on all <code>&lt;a&gt;</code> links. Common: <code>_blank</code> for new tab.</li>
+</ul>
+<div class="block">
+<strong>Example – table from external site, links in new tab:</strong>
+<pre><code>[wpws url="https://example.com/markets" query="#prices table" basehref="1" a_target="_blank"]</code></pre>
+</div>
+</section>
+
+<!-- CALLBACKS -->
+<section id="callbacks">
+<h2>Callbacks</h2>
+<p>WP WS Reborn 2026 supports two callback arguments:</p>
+<ul class="args">
+<li><code>callback_raw</code> – Called <strong>before</strong> all parsing, filters, and link fixes. Receives the raw response (string or array). Good for low-level transforms, logging, or custom decoding.</li>
+<li><code>callback</code> – Called <strong>after</strong> all parsing, filters, <code>remove_query</code>/<code>replace_query</code>, <code>basehref</code>, and <code>a_target</code>. Receives the final processed string. Use for formatting, JSON/XML parsing, or last‑step cleanup.</li>
+</ul>
+<p>Both callbacks must be the <strong>name of a callable PHP function</strong> that is available (e.g. in your theme’s <code>functions.php</code> or a custom plugin). The plugin validates and sanitizes data before and after the callback for security.</p>
+
+<div class="note"><strong>Allow-list (security):</strong> for safety, only <strong>allow-listed</strong> functions may run as callbacks. Any function whose name starts with <code>wpws_</code> (the plugin’s built-in helpers and your own) is allowed automatically, plus a few harmless text helpers. To permit one of your own non-<code>wpws_</code> functions, add it via the <code>wpws_allowed_callbacks</code> filter:
+<pre><code>add_filter( 'wpws_allowed_callbacks', function ( $list ) {
+    $list[] = 'my_json_parser';
+    return $list;
+} );</code></pre></div>
+
+<div class="info"><strong>Parameterised callbacks:</strong> pass arguments with <code>name:arg1,arg2</code>. The value(s) after the colon are passed to your function after the content. Example: <code>callback="wpws_drop_columns:4"</code> calls <code>wpws_drop_columns($content, '4')</code>. See <a href="#table-helpers">Table filtering helpers</a>.</div>
+
+<div class="block">
+<strong>Example – JSON response, extract one field via <code>callback</code>:</strong>
+<pre><code>[wpws url="https://api.ipify.org?format=json" basehref="0" callback="wpws_my_json_parser"]</code></pre>
+<p>In theme <code>functions.php</code> (custom functions must be added to the allow-list — the <code>wpws_</code> prefix alone is no longer enough):</p>
+<pre><code>function wpws_my_json_parser( $content ) {
+    $obj = json_decode( trim( $content ) );
+    return $obj ? $obj-&gt;ip : '';
+}
+add_filter( 'wpws_allowed_callbacks', function ( $list ) {
+    $list[] = 'wpws_my_json_parser';
+    return $list;
+} );</code></pre>
+<p><em>Tip: for JSON, the built-in <a href="#query-types">JSONPath</a> query type (<code>query="$.ip" query_type="jsonpath"</code>) does this with no callback.</em></p>
+</div>
+
+<div class="block">
+<strong>Example – preprocess raw HTML via <code>callback_raw</code>:</strong>
+<pre><code>[wpws url="https://example.com" query=".content" callback_raw="wpws_my_raw_filter"]</code></pre>
+<p>In theme <code>functions.php</code>:</p>
+<pre><code>function wpws_my_raw_filter( $raw ) {
+    // Example: strip tracking query parameters before parsing
+    return preg_replace( '/utm_[^&]*/', '', $raw );
+}</code></pre>
+</div>
+</section>
+
+<!-- TABLE HELPERS -->
+<section id="table-helpers">
+<h2>Table filtering helpers</h2>
+<p>When you scrape a table you often want only some of its columns or rows. These built-in helper functions take the table HTML and return a trimmed table. Use them via <code>callback</code> with the <a href="#callbacks">parameterised <code>name:args</code> syntax</a>. Column/row numbers are <strong>1-based</strong>, and specs support single numbers (<code>4</code>), lists (<code>4_7_9</code>) and ranges (<code>5-8</code>), e.g. <code>1-3_7</code>.</p>
+<ul class="args">
+<li><code>wpws_drop_columns:SPEC</code> – remove the listed columns, <strong>keep the rest</strong> (e.g. keep 6 of 10 by dropping 4).</li>
+<li><code>wpws_keep_columns:SPEC</code> – keep only the listed columns.</li>
+<li><code>wpws_drop_rows:SPEC</code> – remove the listed rows, keep the rest.</li>
+<li><code>wpws_keep_rows:SPEC</code> – keep only the listed rows.</li>
+</ul>
+<div class="block">
+<strong>Example – scrape a table but drop column 2 (keep the rest):</strong>
+<pre><code>[wpws url="https://www.w3schools.com/html/html_tables.asp" query="#customers" callback="wpws_drop_columns:2"]</code></pre>
+<strong>Example – keep columns 1–3 and 7 only:</strong>
+<pre><code>[wpws url="https://example.com/report" query="table.data" callback="wpws_keep_columns:1-3_7"]</code></pre>
+</div>
+<p><em>Deprecated:</em> the older fixed-name shortcuts (<code>wpws_keep_first_3_columns</code> … <code>_10_rows</code>, <code>wpws_keep_4_cols_5_rows</code> and similar) still work but will be removed in a future major version — use <code>wpws_keep_columns:1-4</code> / <code>wpws_keep_rows:1-5</code> instead.</p>
+<p>From PHP you can call them directly, e.g. <code>echo wpws_drop_columns( $html, '2_5_8_9' );</code> or the low-level <code>wpws_filter_table_advanced( $html, $columns_spec, $rows_spec )</code> / <code>wpws_filter_table_exclude( $html, $columns_spec, $rows_spec )</code>.</p>
+<div class="note"><strong>Note:</strong> column positions are counted per row. Tables that use <code>colspan</code>/<code>rowspan</code> (merged cells) may not line up — in that case prefer <code>wpws_keep_columns</code> with an explicit list.</div>
+</section>
+
+<!-- TEXT HELPERS -->
+<section id="text-helpers">
+<h2>Text helper: bold words</h2>
+<p><code>wpws_bold_words</code> wraps whole-word, case-insensitive matches in <code>&lt;strong&gt;</code>. Pass the words with the parameterised syntax (comma-separated):</p>
+<pre><code>[wpws url="https://example.com/standings" query="table" callback="wpws_bold_words:Alpha,Beta"]</code></pre>
+</section>
+
+<!-- AUTH -->
+<section id="auth">
+<h2>Authentication</h2>
+<p>Send credentials with the request to scrape protected endpoints. <strong>Recommended: authentication profiles.</strong> Define credentials once under <em>Settings → WP WS Reborn 2026 → Authentication profiles</em>, one per line:</p>
+<pre><code>myapi   | bearer | YOUR_TOKEN
+intranet| basic  | USER | PASSWORD
+keyed   | header | X-Api-Key | YOUR_KEY</code></pre>
+<p>then reference the profile by name — the secret never enters post content, revisions or page HTML:</p>
+<pre><code>[wpws url="https://api.example.com/data" query="$.value" query_type="jsonpath" auth_profile="myapi"]</code></pre>
+<p>Developers can supply profiles from <code>wp-config.php</code> constants or environment variables with the <code>wpws_auth_profiles</code> filter instead of storing them in the database.</p>
+<p><strong>Legacy inline credentials</strong> (still supported, not recommended):</p>
+<ul class="args">
+<li><code>auth_type</code> – <code>none</code> (default), <code>basic</code>, or <code>bearer</code>.</li>
+<li><code>auth_user</code> / <code>auth_pass</code> – username and password for <code>basic</code> auth (sent as an <code>Authorization: Basic</code> header).</li>
+<li><code>auth_token</code> – token for <code>bearer</code> auth (sent as <code>Authorization: Bearer …</code>).</li>
+</ul>
+<div class="note"><strong>Security:</strong> inline credentials are stored in the post content and every revision, visible to anyone who can edit the post. Use <code>auth_profile</code> instead. The block editor no longer offers inline credential fields and shows a warning (with a one-click remove) for blocks that still contain them. Credentials are never printed in the debug comment or in AJAX placeholders.</div>
+</section>
+
+<!-- MOBILE -->
+<section id="mobile">
+<h2>Mobile emulation</h2>
+<p>Request the mobile version of a page by sending a mobile User-Agent and client hints:</p>
+<ul class="args">
+<li><code>mobile</code> – <code>1</code> to enable, <code>0</code> to disable (default).</li>
+<li><code>mobile_type</code> – <code>generic</code> (default), <code>android</code>, <code>iphone</code>, or <code>ipad</code>.</li>
+</ul>
+<pre><code>[wpws url="https://example.com" query=".m-table" mobile="1" mobile_type="iphone"]</code></pre>
+<p>Mobile and desktop responses are cached separately.</p>
+</section>
+
+<!-- AJAX / BACKGROUND -->
+<section id="ajax">
+<h2>AJAX lazy load &amp; background refresh</h2>
+<ul class="args">
+<li><code>ajax</code> – <code>1</code> renders a placeholder immediately and loads the scraped content in the browser via AJAX after the page paints. Good for slow sources so they don’t block your page render.</li>
+<li><code>background_refresh</code> – <code>1</code> serves the cached copy instantly and, once the cache is ~90% expired, refreshes it in the background via WP-Cron (stale-while-revalidate). Visitors never wait for a refetch.</li>
+</ul>
+<pre><code>[wpws url="https://slow.example.com/feed" query=".headlines li" ajax="1"]
+[wpws url="https://example.com/rates" query="#rates" cache="30" background_refresh="1"]</code></pre>
+<div class="info">On network errors or temporary HTTP failures the plugin automatically falls back to the last good cached copy (up to 7 days), and uses <code>ETag</code>/<code>Last-Modified</code> conditional requests to avoid re-downloading unchanged pages.</div>
+</section>
+
+<!-- DYNAMIC URLS -->
+<section id="dynamic-urls">
+<h2>Dynamic URLs</h2>
+<p>Placeholders in the URL are replaced using values from <code>$_GET</code>:</p>
+<ul class="args">
+<li><code>___param___</code> – Replaced with <code>$_GET['param']</code>.</li>
+<li><code>___QUERY_STRING___</code> – Replaced with the full query string.</li>
+</ul>
+<div class="block">
+<strong>Example – stock symbol from query:</strong>
+<pre><code>[wpws url="https://example.com/quote?symbol=___symbol___" query=".price"]</code></pre>
+<p>Visit the page with <code>?symbol=AAPL</code> to use Apple.</p>
+</div>
+</section>
+
+<!-- ON_ERROR -->
+<section id="on-error">
+<h2>on_error handling</h2>
+<p>Controls what is shown when a request or parsing fails:</p>
+<ul class="args">
+<li><code>on_error="error_show"</code> – Show the plugin error message (default) — <strong>only to logged-in users who can edit posts</strong>; visitors see nothing. Filter: <code>wpws_show_errors</code>.</li>
+<li><code>on_error="error_hide"</code> – Show nothing.</li>
+<li><code>on_error="Your message"</code> – Show that string to everyone instead (basic HTML allowed).</li>
+</ul>
+<pre><code>[wpws url="https://example.com/stock/___symbol___" query=".quote" on_error="Stock data unavailable"]</code></pre>
+</section>
+
+<!-- ATOM SHORTCODES -->
+<section id="atom">
+<h2>Atom/RSS feed link shortcodes</h2>
+<p>Two extra shortcodes extract links of a given file type from any Atom/RSS feed — handy for image galleries from RSS or download lists from Atom.</p>
+
+<h3>wpws_atom_links</h3>
+<p>Regex-based: finds every <code>http(s)</code> URL ending in the given extension anywhere in the feed (matches <code>href</code> and <code>url</code> attributes, including <code>media:content</code>). No XML namespace headaches.</p>
+<ul class="args">
+<li><code>url</code> – <em>Required.</em> Feed URL.</li>
+<li><code>extension</code> – File extension without dot (default <code>jpg</code>).</li>
+<li><code>format</code> – <code>list</code> (HTML <code>&lt;ul&gt;</code>, default) or <code>plain</code> (one URL per line).</li>
+<li><code>cache</code> – Minutes to cache (default 60).</li>
+</ul>
+<pre><code>[wpws_atom_links url="http://rss.cnn.com/rss/cnn_topstories.rss" extension="jpg"]</code></pre>
+
+<h3>wpws_atom_zip_links</h3>
+<p>DOM-based alternative for proper Atom feeds: reads <code>&lt;link href&gt;</code>, <code>&lt;enclosure&gt;</code> and <code>media:content</code> elements. Same arguments; <code>url</code> is required and <code>extension</code> defaults to <code>zip</code>.</p>
+<pre><code>[wpws_atom_zip_links url="https://example.com/atom_feed.xml" extension="zip" format="plain"]</code></pre>
+</section>
+
+<!-- GUTENBERG BLOCK -->
+<section id="block">
+<h2>Gutenberg block</h2>
+<p>In the block editor, add the <strong>WP Web Scraper</strong> block (search “scraper”). Set the URL, query, query type, output, cache, authentication and background refresh in the block sidebar; a live preview renders in the editor. The block is server-side rendered, so output always reflects the current source on the front end.</p>
+</section>
+
+<!-- SECURITY -->
+<section id="security">
+<h2>Security &amp; allow-listed callbacks</h2>
+<p>The plugin ships with several protections, configurable under <em>Settings → WP WS Reborn 2026</em>:</p>
+<ul class="args">
+<li><strong>SSRF protection</strong> – blocks requests to localhost and private/internal IP ranges (incl. cloud metadata). Each redirect hop is re-validated, and hosts are checked across both IPv4 and IPv6 plus integer-IP encodings.</li>
+<li><strong>Domain whitelist / blacklist</strong> – restrict scraping to (or away from) specific domains, one per line.</li>
+<li><strong>Require HTTPS</strong> – reject plain <code>http://</code> URLs.</li>
+<li><strong>HTML sanitisation</strong> – scraped output is run through <code>wp_kses</code> (post context) and <code>&lt;script&gt;</code> blocks are stripped.</li>
+<li><strong>DNS pinning</strong> – the connection is made to the exact IP that passed the SSRF check (cURL transport), so DNS-rebinding cannot swap in an internal address between check and fetch. Hosts that do not resolve are blocked.</li>
+<li><strong>Rate limiting</strong> – cap outgoing requests per remote host per time window (default 20 / 60&nbsp;s). Only real fetches count; cache hits do not.</li>
+<li><strong>Who may use it</strong> – shortcodes and blocks only run in content whose author has the <code>edit_others_posts</code> capability (Editors, Administrators); previews and block-editor renders also check the current user. Change with the <code>wpws_required_capability</code> filter. Widgets and the template tag are not restricted.</li>
+<li><strong>Error visibility</strong> – error messages and the debug comment are shown only to users who can edit posts.</li>
+<li><strong>Sandbox isolation</strong> – the admin Sandbox renders scraped HTML inside a sandboxed iframe (no scripts, no access to the admin page), so testing a hostile page cannot act in your admin session.</li>
+<li><strong>Cache</strong> – one compressed entry per request (status, content-type/ETag/Last-Modified, body), served fresh for <code>cache</code> minutes and kept 7 more days as a fallback for errors. When an entry expires only one request refreshes it; concurrent visitors get the previous copy.</li>
+<li><strong>Isolated dependencies</strong> – the bundled Symfony CSS selector library is namespace-prefixed (<code>WPWS\Vendor\…</code>), so another plugin shipping a different version cannot break it.</li>
+<li><strong>Allow-listed callbacks</strong> – only the plugin's built-in helpers and functions you register via the <code>wpws_allowed_callbacks</code> filter may run as callbacks (see <a href="#callbacks">Callbacks</a>).</li>
+<li><strong>AJAX lazy-load</strong> – the placeholder carries only an opaque ID; URL, query and credentials stay on the server, so the endpoint cannot be used as an open proxy.</li>
+</ul>
+<div class="note">“Allow access to localhost / private IPs” exists for local development only — leaving it on in production exposes your server to SSRF. Keep it off unless you know you need it.</div>
+</section>
+
+<!-- EXAMPLES -->
+<section id="examples">
+<h2>Examples</h2>
+
+<h3 id="ex-meteo-eq">CSS table row with eq (Meteo.hr)</h3>
+<p>Use a more specific query so that <code>eq</code> selects one row instead of the whole table.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws 
+  url="https://meteo.hr/podaci.php?section=podaci_vrijeme&amp;m=hrvatska1_n" 
+  query=".fd-c-table--responsive tbody tr" 
+  eq="3" 
+  output="html"]</code></pre>
+<p>This selects the fourth table row (<code>eq</code> is 0‑based: 0 = first row, 3 = fourth row).</p>
+
+<h3 id="ex-rss">RSS / Atom feed, XPath, first 10 titles</h3>
+<p>Fetch the latest BBC News headlines from the RSS feed and show the first 10 item titles as a list.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws url="https://feeds.bbci.co.uk/news/rss.xml" query="//item/title" glue="&lt;br /&gt;" query_type="xpath" output="text" lt="10"]</code></pre>
+<p><strong>Template Tag</strong></p>
+<pre><code>&lt;?php echo wpws_get_content(
+    'https://feeds.bbci.co.uk/news/rss.xml',
+    '//item/title',
+    array(
+        'query_type' =&gt; 'xpath',
+        'glue'       =&gt; '&lt;br /&gt;',
+        'output'     =&gt; 'text',
+        'lt'         =&gt; 10,
+    )
+); ?&gt;</code></pre>
+<p><strong>Output (example)</strong></p>
+<pre><code>al-Baghdadi
+Sixers
+Happy Diwali
+Southwest Airlines flight attendant
+Shakur Stevenson
+Syracuse football
+Sylvia Plath
+Ohio State football
+Oklahoma football
+Auburn vs LSU</code></pre>
+
+<h3 id="ex-json">JSON via JSONPath</h3>
+<p>Parse a JSON source and extract one field with the built-in <a href="#query-types">JSONPath</a> query type — no custom callback required.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws url="https://api.ipify.org?format=json" query="$.ip" query_type="jsonpath" basehref="0"]</code></pre>
+<p><strong>Template Tag</strong></p>
+<pre><code>&lt;?php echo wpws_get_content(
+    'https://api.ipify.org?format=json',
+    '$.ip',
+    array(
+        'query_type' =&gt; 'jsonpath',
+        'basehref'   =&gt; 0,
+    )
+); ?&gt;</code></pre>
+<p><strong>Output (example)</strong></p>
+<pre><code>50.87.248.113</code></pre>
+<div class="info">Prefer JSONPath for JSON. If you still want a custom callback (e.g. <code>my_json_parser</code>), allow-list it first via the <code>wpws_allowed_callbacks</code> filter — see <a href="#callbacks">Callbacks</a>.</div>
+
+<h3 id="ex-remove">remove_query and a_target</h3>
+<p>Fetch “Trending Now” text and remove bold tags, opening links in a new window.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws url="https://www.yahoo.com/" query="ol.trendingnow_trend-list li" remove_query="b" a_target="_blank"]</code></pre>
+<p><strong>Template Tag</strong></p>
+<pre><code>&lt;?php echo wpws_get_content(
+    'https://www.yahoo.com/',
+    'ol.trendingnow_trend-list li',
+    array(
+        'a_target'    =&gt; '_blank',
+        'remove_query' =&gt; 'b',
+    )
+); ?&gt;</code></pre>
+
+<h3 id="ex-basehref">basehref and a_target</h3>
+<p>Fetch an external table and open any links in a new tab.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws url="https://www.w3schools.com/html/html_tables.asp" query="#customers" basehref="1" a_target="_blank"]</code></pre>
+<p><strong>Template Tag</strong></p>
+<pre><code>&lt;?php echo wpws_get_content(
+    'https://www.w3schools.com/html/html_tables.asp',
+    '#customers',
+    array(
+        'basehref'  =&gt; 1,
+        'a_target'  =&gt; '_blank',
+    )
+); ?&gt;</code></pre>
+
+<h3 id="ex-dynamic">Dynamic URL and on_error</h3>
+<p>Use a URL with a placeholder (e.g. <code>___symbol___</code>) and show a custom message if the request fails.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws url="https://example.com/quote?symbol=___symbol___"
+      query=".price"
+      on_error="Quote not available. Pass ?symbol= in the URL."]</code></pre>
+<p><strong>Template Tag</strong></p>
+<pre><code>&lt;?php echo wpws_get_content(
+    'https://example.com/quote?symbol=' . ( isset( $_GET['symbol'] ) ? esc_attr( $_GET['symbol'] ) : '' ),
+    '.price',
+    array(
+        'on_error' =&gt; 'Quote not available. Pass ?symbol= in the URL.',
+    )
+); ?&gt;</code></pre>
+
+<h3 id="ex-filters">Combining gt and lt (range)</h3>
+<p>Select only a middle range of elements using <code>gt</code> and <code>lt</code>.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws url="https://example.com/news" query="h2" gt="2" lt="8" output="text" glue=" | "]</code></pre>
+<p>Returns headlines at indices 3–7 only.</p>
+
+<h3 id="ex-atom-links">Feed links by extension (wpws_atom_links)</h3>
+<p>Extract only links that start with <code>http://</code> or <code>https://</code> and end with a given file extension from any Atom/RSS feed. Useful for image URLs in RSS (<code>media:content</code>) or download links in Atom feeds.</p>
+<p><strong>Shortcode</strong></p>
+<pre><code>[wpws_atom_links url="http://rss.cnn.com/rss/cnn_topstories.rss" extension="jpg"]</code></pre>
+<p>Returns all image (.jpg) URLs from the CNN top stories RSS feed. Use <code>format="plain"</code> for one URL per line, or <code>extension="zip"</code> for .zip links (e.g. on Atom feeds).</p>
+</section>
+
+<!-- ADMIN -->
+<section id="admin">
+<h2>Admin: Sandbox, Import, Help</h2>
+<ul class="args">
+<li><strong>Sandbox</strong> – Test URL, query, and arguments before using them in posts. Use “Test Scrap” or “Test Shortcode”. Results appear in the Output, Shortcode, Template Tag, and Debug tabs.</li>
+<li><strong>Import</strong> – Create posts from scraped content. Title, content, and tags can include shortcodes. Optional URL override, categories, status, author. “Post as shortcode” keeps content dynamic.</li>
+<li><strong>Help</strong> – In-plugin docs and examples.</li>
+<li><strong>Quick Help</strong> – Sidebar with shortcode/template syntax, query types, and common arguments.</li>
+</ul>
+<div class="info"><strong>Tip:</strong> Use Sandbox first to verify queries and copy the generated shortcode or template tag.</div>
+</section>
+
+<!-- REQUIREMENTS -->
+<section id="requirements">
+<h2>Requirements &amp; resources</h2>
+<ul class="args">
+<li>PHP 7.4+</li>
+<li>WordPress 5.0+</li>
+<li>Symfony CSS Selector (included). Caching uses WordPress Transients; a cache plugin (e.g. Redis, Memcached) improves performance.</li>
+</ul>
+<p><strong>Rate limiting:</strong> 20 outgoing requests per minute per remote host by default (configurable under Settings → Rate Limiting); cache hits do not count.</p>
+<p><strong>Original plugin code:</strong> <a href="https://github.com/wp-plugins/wp-web-scrapper">github.com/wp-plugins/wp-web-scrapper</a></p>
+<p><strong>Support:</strong> <a href="https://wordpress.org/support/plugin/wp-web-scrapper/">WordPress.org plugin forum</a></p>
+<p><a href="#toc">Back to contents</a></p>
+</section>
+
+<script>
+(function() {
+  function createCopyButton(pre, code) {
+    var btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.type = 'button';
+    btn.textContent = 'Copy shortcode';
+    btn.addEventListener('click', function() {
+      var text = code.innerText || code.textContent || '';
+      if (!text.trim()) { return; }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(function() {
+            btn.textContent = 'Copied!';
+            setTimeout(function() { btn.textContent = 'Copy shortcode'; }, 1500);
+          });
+        } else {
+          var textarea = document.createElement('textarea');
+          textarea.value = text;
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
+          textarea.focus();
+          textarea.select();
+          try { document.execCommand('copy'); } catch (e) {}
+          document.body.removeChild(textarea);
+          btn.textContent = 'Copied!';
+          setTimeout(function() { btn.textContent = 'Copy shortcode'; }, 1500);
+        }
+      } catch (e) {}
+    });
+    pre.appendChild(btn);
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var blocks = document.querySelectorAll('pre code');
+    Array.prototype.forEach.call(blocks, function(code) {
+      var text = (code.innerText || code.textContent || '').trim();
+      if (!text.startsWith('[wpws')) {
+        return;
+      }
+      var pre = code.parentNode;
+      if (!pre || pre.tagName.toLowerCase() !== 'pre') {
+        return;
+      }
+      createCopyButton(pre, code);
+    });
+  });
+})();
+</script>
+
+</body>
+</html>
