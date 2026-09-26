@@ -46,6 +46,7 @@ class WP_Web_Scraper {
 	 */
 	public static function init() {
 		load_plugin_textdomain( 'wp-web-scraper' );
+		self::maybe_upgrade();
 		$wpws_options = get_option( 'wpws_options', array() );
 		if ( ! empty( $wpws_options['sc_posts'] ) )
 			add_shortcode( 'wpws', array( 'WP_Web_Scraper', 'shortcode' ) );
@@ -86,6 +87,31 @@ class WP_Web_Scraper {
 		include( $file );
 	}
 
+	/** Storage schema version (bump when stored data formats change). */
+	const DB_VERSION = 2;
+
+	/**
+	 * One-time data migrations. v2: the cache moved from three full-response
+	 * transients per URL (wpws_<hash>, wpws_stale_, wpws_ct_ …) to one slim
+	 * entry (wpws_c_<hash>); delete the old rows instead of letting them sit
+	 * in wp_options for up to 7 days.
+	 */
+	public static function maybe_upgrade() {
+		if ( (int) get_option( 'wpws_db_version', 1 ) >= self::DB_VERSION ) return;
+		self::delete_legacy_cache();
+		update_option( 'wpws_db_version', self::DB_VERSION, false );
+	}
+
+	/** Remove v1 cache transients (only stored in wp_options without an object cache). */
+	public static function delete_legacy_cache() {
+		global $wpdb;
+		$wpdb->query(
+			"DELETE FROM {$wpdb->options}
+			 WHERE option_name REGEXP '^_transient(_timeout)?_wpws_([0-9a-f]{32}|(stale|ct|etag|lm)_[0-9a-f]{32})$'
+			    OR option_name LIKE '\\_transient%\\_wpws\\_rate\\_limit\\_%'"
+		);
+	}
+
 	/** Plugin activation: sets default options. */
 	public static function plugin_activate() {
 		$default_wpws_options = array(
@@ -118,10 +144,84 @@ class WP_Web_Scraper {
 	 * Requires self::$error and self::$args to be set before calling.
 	 */
 	private static function _handle_error() {
-		$on_error = self::$args['on_error'];
+		$on_error = isset( self::$args['on_error'] ) ? self::$args['on_error'] : 'error_show';
 		if ( $on_error === 'error_hide' ) return '';
-		if ( $on_error === 'error_show' ) return self::$error;
-		return ! empty( $on_error ) ? $on_error : self::$error;
+		if ( $on_error === 'error_show' || $on_error === '' ) {
+			// Technical details (HTTP codes, blocked hosts, rate limits…) are
+			// shown only to people who can fix them; visitors see nothing.
+			return self::can_see_errors()
+				? '<span class="wpws-error">' . esc_html( (string) self::$error ) . '</span>'
+				: '';
+		}
+		// Custom fallback text chosen by the author, e.g. on_error="Data unavailable".
+		return wp_kses_post( $on_error );
+	}
+
+	/**
+	 * Whether the current viewer may see scraper errors and debug output.
+	 * Default: users who can edit posts. Filter: wpws_show_errors.
+	 *
+	 * @return bool
+	 */
+	public static function can_see_errors() {
+		$can = function_exists( 'current_user_can' ) && current_user_can( 'edit_posts' );
+		return (bool) apply_filters( 'wpws_show_errors', $can );
+	}
+
+	/**
+	 * Diagnostic HTML comment, emitted only for viewers who can see errors.
+	 * "--" is neutralised so the message cannot close the comment early.
+	 *
+	 * @param string $message Plain-text message.
+	 * @return string
+	 */
+	private static function _admin_notice( $message ) {
+		if ( ! self::can_see_errors() ) return '';
+		return '<!-- ' . str_replace( '--', '- -', esc_html( $message ) ) . ' -->';
+	}
+
+	/**
+	 * Capability required from the author of content that uses the scraper
+	 * (shortcode or block). Default edit_others_posts (Editor, Administrator).
+	 *
+	 * @return string
+	 */
+	public static function required_capability() {
+		return (string) apply_filters( 'wpws_required_capability', 'edit_others_posts' );
+	}
+
+	/**
+	 * Whether scraper shortcodes/blocks may run in the current context.
+	 *
+	 * Without this, anyone who can write a post (Contributor and up) could make
+	 * the server fetch arbitrary URLs just by previewing a draft or through the
+	 * block editor's server-side preview. Checked against:
+	 *  - the author of the post being rendered (covers publish + preview), and
+	 *  - the current user during previews and REST (block editor) renders.
+	 * Content outside a post (widgets, template tags) is not restricted:
+	 * editing those already requires higher privileges.
+	 *
+	 * @return bool
+	 */
+	public static function author_can_scrape() {
+		$cap  = self::required_capability();
+		$post = function_exists( 'get_post' ) ? get_post() : null;
+		if ( $post && ! empty( $post->post_author ) && ! user_can( (int) $post->post_author, $cap ) ) {
+			return false;
+		}
+		$is_rest = defined( 'REST_REQUEST' ) && REST_REQUEST;
+		if ( ( $is_rest || ( function_exists( 'is_preview' ) && is_preview() ) )
+			&& is_user_logged_in() && ! current_user_can( $cap ) ) {
+			return false;
+		}
+		return true;
+	}
+
+	/** Output used when author_can_scrape() refuses to run. */
+	private static function _not_permitted() {
+		return self::can_see_errors()
+			? '<span class="wpws-error">' . esc_html( sprintf( 'WP Web Scraper: the author of this content needs the "%s" capability to use it.', self::required_capability() ) ) . '</span>'
+			: '';
 	}
 
 	/**
@@ -319,6 +419,9 @@ class WP_Web_Scraper {
 	 * @return string Rendered HTML or text output.
 	 */
 	public static function shortcode( $atts ) {
+		if ( ! self::author_can_scrape() ) {
+			return self::_not_permitted();
+		}
 		$default_args = array(
 			'url'         => '',
 			'query'       => '',
@@ -336,13 +439,19 @@ class WP_Web_Scraper {
 		}
 		$args         = wp_parse_args( $atts, $default_args );
 		$args['url']  = str_replace( array( '&#038;', '&#38;', '&amp;' ), '&', $args['url'] );
-		if ( isset( $args['headers'] ) ) {
-			$args['headers'] = str_replace( array( '&#038;', '&#38;', '&amp;' ), '&', $args['headers'] );
+		// Query-string style args: WordPress encodes "&" in post content.
+		$qs_args = array( 'headers', 'post_body', 'request_headers' );
+		foreach ( $qs_args as $k ) {
+			if ( isset( $args[ $k ] ) ) {
+				$args[ $k ] = str_replace( array( '&#038;', '&#38;', '&amp;' ), '&', $args[ $k ] );
+			}
 		}
 		if ( $args['urldecode'] == 1 ) {
 			$args['url'] = urldecode( $args['url'] );
-			if ( isset( $args['headers'] ) )
-				$args['headers'] = urldecode( $args['headers'] );
+			foreach ( $qs_args as $k ) {
+				if ( isset( $args[ $k ] ) )
+					$args[ $k ] = urldecode( $args[ $k ] );
+			}
 		}
 		if ( $args['querydecode'] == 1 ) {
 			$args['query'] = urldecode( $args['query'] );
@@ -361,6 +470,9 @@ class WP_Web_Scraper {
 	 * @return string HTML list or plain URLs, or error comment.
 	 */
 	public static function shortcode_atom_zip_links( $atts ) {
+		if ( ! self::author_can_scrape() ) {
+			return self::_not_permitted();
+		}
 		$args = shortcode_atts( array(
 			'url'       => '',
 			'format'    => 'list',
@@ -370,12 +482,12 @@ class WP_Web_Scraper {
 
 		$url = html_entity_decode( trim( $args['url'] ), ENT_QUOTES, 'UTF-8' );
 		if ( $url === '' ) {
-			return '<!-- wpws_atom_zip_links: url is required -->';
+			return self::_admin_notice( 'wpws_atom_zip_links: url is required' );
 		}
 
 		$url_validation = WP_Web_Scraper_Security::validate_url( $url );
 		if ( ! $url_validation['valid'] ) {
-			return '<!-- wpws_atom_zip_links: ' . esc_html( $url_validation['error'] ) . ' -->';
+			return self::_admin_notice( 'wpws_atom_zip_links: ' . $url_validation['error'] );
 		}
 
 		$extension     = strtolower( preg_replace( '/[^a-z0-9]/i', '', $args['extension'] ) ) ?: 'zip';
@@ -386,11 +498,11 @@ class WP_Web_Scraper {
 		if ( $links === false ) {
 			$body = self::_fetch_remote_body( $url );
 			if ( is_wp_error( $body ) ) {
-				return '<!-- wpws_atom_zip_links: ' . esc_html( $body->get_error_message() ) . ' -->';
+				return self::_admin_notice( 'wpws_atom_zip_links: ' . $body->get_error_message() );
 			}
 			$links = self::_parse_atom_zip_links( $body, $extension );
 			if ( $links === null ) {
-				return '<!-- wpws_atom_zip_links: failed to parse XML -->';
+				return self::_admin_notice( 'wpws_atom_zip_links: failed to parse XML' );
 			}
 			if ( $cache_minutes > 0 ) {
 				set_transient( $cache_key, $links, $cache_minutes * 60 );
@@ -398,7 +510,7 @@ class WP_Web_Scraper {
 		}
 
 		if ( empty( $links ) ) {
-			return '<!-- wpws_atom_zip_links: no .' . esc_html( $extension ) . ' links found -->';
+			return self::_admin_notice( 'wpws_atom_zip_links: no .' . $extension . ' links found' );
 		}
 
 		return self::_render_link_list( $links, $args['format'], 'wpws-atom-zip-links' );
@@ -411,6 +523,9 @@ class WP_Web_Scraper {
 	 * @return string HTML list, plain URLs, or error comment.
 	 */
 	public static function shortcode_atom_links( $atts ) {
+		if ( ! self::author_can_scrape() ) {
+			return self::_not_permitted();
+		}
 		$args = shortcode_atts( array(
 			'url'       => '',
 			'extension' => 'jpg',
@@ -420,12 +535,12 @@ class WP_Web_Scraper {
 
 		$url = html_entity_decode( trim( $args['url'] ), ENT_QUOTES, 'UTF-8' );
 		if ( $url === '' ) {
-			return '<!-- wpws_atom_links: url is required -->';
+			return self::_admin_notice( 'wpws_atom_links: url is required' );
 		}
 
 		$url_validation = WP_Web_Scraper_Security::validate_url( $url );
 		if ( ! $url_validation['valid'] ) {
-			return '<!-- wpws_atom_links: ' . esc_html( $url_validation['error'] ) . ' -->';
+			return self::_admin_notice( 'wpws_atom_links: ' . $url_validation['error'] );
 		}
 
 		$extension     = strtolower( preg_replace( '/[^a-z0-9]/i', '', $args['extension'] ) ) ?: 'jpg';
@@ -436,11 +551,11 @@ class WP_Web_Scraper {
 		if ( $links === false ) {
 			$body = self::_fetch_remote_body( $url );
 			if ( is_wp_error( $body ) ) {
-				return '<!-- wpws_atom_links: ' . esc_html( $body->get_error_message() ) . ' -->';
+				return self::_admin_notice( 'wpws_atom_links: ' . $body->get_error_message() );
 			}
 			$links = self::_parse_atom_links_regex( $body, $extension );
 			if ( empty( $links ) ) {
-				return '<!-- wpws_atom_links: no http(s) links ending with .' . esc_html( $extension ) . ' found -->';
+				return self::_admin_notice( 'wpws_atom_links: no http(s) links ending with .' . $extension . ' found' );
 			}
 			if ( $cache_minutes > 0 ) {
 				set_transient( $cache_key, $links, $cache_minutes * 60 );
@@ -577,14 +692,17 @@ class WP_Web_Scraper {
 			}
 		}
 
-		if ( isset( self::$args['headers'] ) && strpos( self::$args['headers'], '__' ) !== false ) {
-			if ( strstr( self::$args['headers'], '___QUERY_STRING___' ) ) {
-				self::$args['headers'] = str_replace( '___QUERY_STRING___', isset( $_SERVER['QUERY_STRING'] ) ? $_SERVER['QUERY_STRING'] : '', self::$args['headers'] );
+		foreach ( array( 'headers', 'post_body' ) as $body_key ) {
+			if ( empty( self::$args[ $body_key ] ) || ! is_string( self::$args[ $body_key ] ) || strpos( self::$args[ $body_key ], '__' ) === false ) {
+				continue;
+			}
+			if ( strstr( self::$args[ $body_key ], '___QUERY_STRING___' ) ) {
+				self::$args[ $body_key ] = str_replace( '___QUERY_STRING___', isset( $_SERVER['QUERY_STRING'] ) ? $_SERVER['QUERY_STRING'] : '', self::$args[ $body_key ] );
 			} else {
-				self::$args['headers'] = preg_replace_callback( '/___(.*?)___/', function( $matches ) {
+				self::$args[ $body_key ] = preg_replace_callback( '/___(.*?)___/', function( $matches ) {
 					$key = isset( $matches[1] ) ? sanitize_key( $matches[1] ) : '';
 					return isset( $_REQUEST[ $key ] ) ? sanitize_text_field( $_REQUEST[ $key ] ) : '';
-				}, self::$args['headers'] );
+				}, self::$args[ $body_key ] );
 			}
 		}
 
@@ -651,26 +769,22 @@ class WP_Web_Scraper {
 		$ob_header = PHP_EOL;
 		$ob_footer = PHP_EOL;
 
-		if ( self::$args['debug'] == 1 ) {
-			// Never expose credentials in the (publicly visible) debug comment.
-			$debug_args = self::$args;
-			foreach ( array( 'auth_user', 'auth_pass', 'auth_token' ) as $secret ) {
-				if ( ! empty( $debug_args[ $secret ] ) ) $debug_args[ $secret ] = '***';
-			}
-			if ( ! empty( $debug_args['headers'] ) && is_string( $debug_args['headers'] )
-				&& stripos( $debug_args['headers'], 'authorization' ) !== false ) {
-				$debug_args['headers'] = '*** (contains credentials) ***';
-			}
+		// Debug comment: only for viewers who may see errors (never for the
+		// public), with secrets masked and "--" neutralised so scraped values
+		// cannot close the comment and inject markup.
+		if ( self::$args['debug'] == 1 && self::can_see_errors() ) {
+			$debug_args = self::mask_secrets( self::$args );
+			$safe       = function ( $v ) { return str_replace( '--', '- -', (string) $v ); };
 			$ob_header = PHP_EOL .
 				'<!--' . PHP_EOL .
 				' Start of web scrap (created by wp-web-scraper)' . PHP_EOL .
-				' Source URL: ' . self::$url . PHP_EOL .
-				' Query: ' . self::$query . ' (' . self::$args['query_type'] . ')' . PHP_EOL .
-				' Other options: ' . print_r( $debug_args, true ) . '-->' . PHP_EOL;
+				' Source URL: ' . $safe( self::$url ) . PHP_EOL .
+				' Query: ' . $safe( self::$query ) . ' (' . $safe( self::$args['query_type'] ) . ')' . PHP_EOL .
+				' Other options: ' . $safe( print_r( $debug_args, true ) ) . '-->' . PHP_EOL;
 			$ob_footer = PHP_EOL .
 				'<!--' . PHP_EOL .
 				' End of web scrap' . PHP_EOL .
-				' WPWS Cache Control: ' . self::$xcache . PHP_EOL .
+				' WPWS Cache Control: ' . $safe( self::$xcache ) . PHP_EOL .
 				' Computing time: ' . round( microtime( true ) - $mt_start, 4 ) . ' seconds' . PHP_EOL .
 				'-->' . PHP_EOL;
 		}
@@ -680,6 +794,25 @@ class WP_Web_Scraper {
 			: self::_handle_error();
 
 		return $ob_header . $ob_body . $ob_footer;
+	}
+
+	/**
+	 * Mask credential-bearing arguments for any diagnostic output.
+	 *
+	 * @param array $args Arguments.
+	 * @return array Copy with secrets replaced by "***".
+	 */
+	public static function mask_secrets( $args ) {
+		foreach ( array( 'auth_user', 'auth_pass', 'auth_token' ) as $secret ) {
+			if ( ! empty( $args[ $secret ] ) ) $args[ $secret ] = '***';
+		}
+		foreach ( array( 'headers', 'post_body', 'request_headers' ) as $k ) {
+			if ( ! empty( $args[ $k ] ) && is_string( $args[ $k ] )
+				&& preg_match( '/auth|token|pass|secret|key|cookie|session/i', $args[ $k ] ) ) {
+				$args[ $k ] = '*** (may contain credentials) ***';
+			}
+		}
+		return $args;
 	}
 
 	/**
@@ -851,19 +984,34 @@ class WP_Web_Scraper {
 	/**
 	 * Retrieve the raw HTTP response (or cached copy). Wraps wp_remote_request().
 	 *
+	 * Cache model (one transient per request, key "wpws_c_<hash>"):
+	 *  - The entry stores a slim response (status, 3 headers, body) plus its
+	 *    creation time. Bodies over 1 KB are gzip-compressed + base64-encoded.
+	 *    Previously the full WP_HTTP response object was stored twice (main +
+	 *    7-day stale copy) with the body duplicated inside the object — up to
+	 *    ~40 MB per URL in wp_options on sites without an object cache.
+	 *  - The entry lives ttl + 7 days; within ttl it is fresh, afterwards it is
+	 *    the stale fallback for errors, 304s and refresh-in-progress.
+	 *  - Only one process refreshes an expired entry (lock); concurrent visitors
+	 *    get the stale copy instead of all hitting the remote site at once.
+	 *
 	 * @param string $url          Site URL to retrieve.
 	 * @param array  $request_args Request options (timeout, cache, useragent, headers, etc.).
 	 * @return WP_Error|array The response array or WP_Error on failure.
 	 */
 	public static function remote_request( $url, $request_args = array() ) {
 
-		$has_custom_headers = isset( $request_args['headers'] )
-			&& $request_args['headers']
-			&& ! empty( $request_args['headers'] )
-			&& ! is_array( $request_args['headers'] );
-
-		if ( $has_custom_headers ) {
-			parse_str( $request_args['headers'], $body );
+		// ── POST body ─────────────────────────────────────────────────────────
+		// "post_body" is the clear name; "headers" is the historic (misleading)
+		// name for the same thing and is still honoured.
+		$post_body = '';
+		if ( ! empty( $request_args['post_body'] ) && is_string( $request_args['post_body'] ) ) {
+			$post_body = $request_args['post_body'];
+		} elseif ( ! empty( $request_args['headers'] ) && is_string( $request_args['headers'] ) ) {
+			$post_body = $request_args['headers'];
+		}
+		if ( $post_body !== '' ) {
+			parse_str( $post_body, $body );
 			$request_args['method'] = 'POST';
 			$request_args['body']   = $body;
 		}
@@ -883,35 +1031,8 @@ class WP_Web_Scraper {
 		$request_args['redirection'] = self::MAX_REDIRECTS;
 		$request_args['httpversion'] = '1.1';
 
-		if ( ! isset( $request_args['headers'] ) || ! is_array( $request_args['headers'] ) ) {
-			$request_args['headers'] = array();
-		}
-
-		// ── HTTP Authentication ───────────────────────────────────────────────
-		// Preferred: a named profile from Settings (secret never in post content).
-		if ( ! empty( $request_args['auth_profile'] ) ) {
-			$profile = WP_Web_Scraper_Security::get_auth_profile( $request_args['auth_profile'] );
-			if ( $profile === null ) {
-				return new WP_Error( 'wpws_auth_profile', 'Unknown auth profile "' . sanitize_key( $request_args['auth_profile'] ) . '"' );
-			}
-			$request_args['auth_type'] = $profile['type'];
-			if ( $profile['type'] === 'bearer' ) {
-				$request_args['auth_token'] = $profile['token'];
-			} elseif ( $profile['type'] === 'basic' ) {
-				$request_args['auth_user'] = $profile['user'];
-				$request_args['auth_pass'] = $profile['pass'];
-			} elseif ( $profile['type'] === 'header' ) {
-				$request_args['headers'][ $profile['header'] ] = $profile['value'];
-			}
-		}
-
-		// Legacy inline credentials (auth_user/auth_pass/auth_token attributes).
-		$auth_type = isset( $request_args['auth_type'] ) ? strtolower( $request_args['auth_type'] ) : 'none';
-		if ( $auth_type === 'bearer' && ! empty( $request_args['auth_token'] ) ) {
-			$request_args['headers']['Authorization'] = 'Bearer ' . $request_args['auth_token'];
-		} elseif ( $auth_type === 'basic' && ! empty( $request_args['auth_user'] ) ) {
-			$request_args['headers']['Authorization'] = 'Basic ' . base64_encode( $request_args['auth_user'] . ':' . $request_args['auth_pass'] );
-		}
+		// From here on "headers" is the real HTTP header array.
+		$request_args['headers'] = array();
 
 		if ( isset( $request_args['mobile'] ) && $request_args['mobile'] ) {
 			$mobile_type = isset( $request_args['mobile_type'] ) ? strtolower( $request_args['mobile_type'] ) : 'generic';
@@ -940,131 +1061,243 @@ class WP_Web_Scraper {
 			$request_args['headers']['Accept-Encoding'] = 'gzip, deflate';
 		}
 
-		// ── Build cache key ───────────────────────────────────────────────────
-		$cache_key_parts = array( $url );
-		if ( isset( $request_args['mobile'] ) && $request_args['mobile'] ) {
-			$mobile_type       = isset( $request_args['mobile_type'] ) ? strtolower( $request_args['mobile_type'] ) : 'generic';
-			$cache_key_parts[] = '_mobile_' . $mobile_type;
-		}
-		if ( ! empty( $request_args['headers'] ) ) {
-			$hh = $request_args['headers'];
-			ksort( $hh );
-			$cache_key_parts[] = serialize( $hh );
-		}
-
-		$hash      = md5( implode( '', $cache_key_parts ) );
-		$transient = 'wpws_' . $hash;
-		$stale_key = 'wpws_stale_' . $hash;
-		$etag_key  = 'wpws_etag_' . $hash;
-		$lm_key    = 'wpws_lm_' . $hash;
-		$ct_key    = 'wpws_ct_' . $hash;
-
-		$skip_cache = ( isset( $request_args['cache'] ) && $request_args['cache'] == 0 );
-		$ttl        = ( ! $skip_cache && isset( $request_args['cache'] ) && (int) $request_args['cache'] > 0 )
-		              ? (int) $request_args['cache'] * 60 : 0;
-
-		// ── Main cache hit ────────────────────────────────────────────────────
-		$cache = $skip_cache ? false : get_transient( $transient );
-		if ( $cache !== false && is_array( $cache ) ) {
-			// Schedule background refresh when cache is ≥90% through its TTL
-			if ( $ttl > 0 && ! empty( $request_args['background_refresh'] ) ) {
-				$created_at = get_transient( $ct_key );
-				if ( $created_at !== false && ( time() - (int) $created_at ) >= $ttl * 0.9 ) {
-					$req_key = 'wpws_req_' . $hash;
-					if ( ! get_transient( $req_key ) ) {
-						set_transient( $req_key, array(
-							'url'       => $url,
-							'args'      => $request_args,
-							'transient' => $transient,
-							'stale_key' => $stale_key,
-							'ct_key'    => $ct_key,
-							'ttl'       => $ttl,
-						), 300 );
-						if ( ! wp_next_scheduled( 'wpws_background_refresh', array( $hash ) ) ) {
-							wp_schedule_single_event( time() + 1, 'wpws_background_refresh', array( $hash ) );
-						}
-					}
-				}
+		// ── Extra request headers (request_headers="Name=value&Other=value") ──
+		if ( ! empty( $request_args['request_headers'] ) && is_string( $request_args['request_headers'] ) ) {
+			foreach ( self::parse_request_headers( $request_args['request_headers'] ) as $name => $value ) {
+				$request_args['headers'][ $name ] = $value;
 			}
-			if ( is_object( $cache['headers'] ) ) $cache['headers'] = $cache['headers']->getAll();
-			if ( is_array( $cache['headers'] ) ) $cache['headers']['X-WPWS-Cache-Control'] = 'Cache-hit Transients API';
-			return $cache;
 		}
 
-		// ── Conditional request: ETag / Last-Modified ─────────────────────────
+		// ── HTTP Authentication (applied last so it cannot be overridden) ─────
+		// Preferred: a named profile from Settings (secret never in post content).
+		if ( ! empty( $request_args['auth_profile'] ) ) {
+			$profile = WP_Web_Scraper_Security::get_auth_profile( $request_args['auth_profile'] );
+			if ( $profile === null ) {
+				return new WP_Error( 'wpws_auth_profile', 'Unknown auth profile "' . sanitize_key( $request_args['auth_profile'] ) . '"' );
+			}
+			$request_args['auth_type'] = $profile['type'];
+			if ( $profile['type'] === 'bearer' ) {
+				$request_args['auth_token'] = $profile['token'];
+			} elseif ( $profile['type'] === 'basic' ) {
+				$request_args['auth_user'] = $profile['user'];
+				$request_args['auth_pass'] = $profile['pass'];
+			} elseif ( $profile['type'] === 'header' ) {
+				$request_args['headers'][ $profile['header'] ] = $profile['value'];
+			}
+		}
+
+		// Legacy inline credentials (auth_user/auth_pass/auth_token attributes).
+		$auth_type = isset( $request_args['auth_type'] ) ? strtolower( $request_args['auth_type'] ) : 'none';
+		if ( $auth_type === 'bearer' && ! empty( $request_args['auth_token'] ) ) {
+			$request_args['headers']['Authorization'] = 'Bearer ' . $request_args['auth_token'];
+		} elseif ( $auth_type === 'basic' && ! empty( $request_args['auth_user'] ) ) {
+			$request_args['headers']['Authorization'] = 'Basic ' . base64_encode( $request_args['auth_user'] . ':' . $request_args['auth_pass'] );
+		}
+
+		// ── Cache key: URL + method/body + headers (credentials hashed, never stored) ──
+		$hh = $request_args['headers'];
+		ksort( $hh );
+		$hash = md5( $url . '|' . ( isset( $request_args['body'] ) ? serialize( $request_args['body'] ) : '' ) . '|' . serialize( $hh ) );
+		$key  = 'wpws_c_' . $hash;
+
+		$skip_cache = ( ! isset( $request_args['cache'] ) || (int) $request_args['cache'] <= 0 );
+		$ttl        = $skip_cache ? 0 : (int) $request_args['cache'] * 60;
+
+		$entry = $skip_cache ? null : self::_cache_get( $key );
+
+		// ── Fresh hit ─────────────────────────────────────────────────────────
+		if ( $entry && ( time() - $entry['created'] ) < $ttl ) {
+			if ( ! empty( $request_args['background_refresh'] ) && ( time() - $entry['created'] ) >= $ttl * 0.9 ) {
+				self::_schedule_background_refresh( $hash, $url, $request_args, $ttl );
+			}
+			return self::_cache_to_response( $entry, 'Cache-hit Transients API' );
+		}
+
+		// ── Miss or expired: only one process refreshes ───────────────────────
+		$locked = false;
 		if ( ! $skip_cache ) {
-			$stored_etag = get_transient( $etag_key );
-			$stored_lm   = get_transient( $lm_key );
-			if ( $stored_etag ) $request_args['headers']['If-None-Match']     = $stored_etag;
-			if ( $stored_lm   ) $request_args['headers']['If-Modified-Since'] = $stored_lm;
-		}
-
-		// ── Fetch (redirects re-validated against the SSRF allow-list) ────────
-		$response = self::_http_request_ssrf_safe( $url, $request_args );
-
-		if ( is_wp_error( $response ) ) {
-			// Fall back to stale copy on network error
-			$stale = $skip_cache ? false : get_transient( $stale_key );
-			if ( $stale !== false && is_array( $stale ) ) {
-				if ( is_object( $stale['headers'] ) ) $stale['headers'] = $stale['headers']->getAll();
-				if ( is_array( $stale['headers'] ) ) $stale['headers']['X-WPWS-Cache-Control'] = 'Stale-cache (network error)';
-				return $stale;
+			$locked = self::_lock_acquire( $hash, $request_args['timeout'] + 15 );
+			if ( ! $locked && $entry ) {
+				return self::_cache_to_response( $entry, 'Stale-cache (refresh in progress)' );
 			}
-			return new WP_Error( 'wpws_remote_request_failed', $response->get_error_message() );
+			// No lock and nothing cached (cold start): fetch anyway; the
+			// per-host rate limit still bounds the burst.
 		}
 
-		$response_code = wp_remote_retrieve_response_code( $response );
+		try {
+			// Conditional request against what we already have.
+			if ( $entry ) {
+				if ( ! empty( $entry['headers']['etag'] ) )          $request_args['headers']['If-None-Match']     = $entry['headers']['etag'];
+				if ( ! empty( $entry['headers']['last-modified'] ) ) $request_args['headers']['If-Modified-Since'] = $entry['headers']['last-modified'];
+			}
 
-		// ── 304 Not Modified: re-use stale ────────────────────────────────────
-		if ( $response_code === 304 ) {
-			$stale = $skip_cache ? false : get_transient( $stale_key );
-			if ( $stale !== false && is_array( $stale ) ) {
-				if ( $ttl > 0 ) {
-					set_transient( $transient, $stale, $ttl );
-					set_transient( $ct_key, time(), $ttl + 86400 );
+			// Fetch (redirects re-validated against the SSRF allow-list).
+			$response = self::_http_request_ssrf_safe( $url, $request_args );
+
+			if ( is_wp_error( $response ) ) {
+				if ( $entry ) return self::_cache_to_response( $entry, 'Stale-cache (network error)' );
+				return new WP_Error( 'wpws_remote_request_failed', $response->get_error_message() );
+			}
+
+			$code = (int) wp_remote_retrieve_response_code( $response );
+
+			if ( $code === 304 ) {
+				if ( $entry ) {
+					$entry['created'] = time();
+					self::_cache_set( $key, $entry, $ttl );
+					return self::_cache_to_response( $entry, 'Cache-refreshed (304)' );
 				}
-				if ( is_object( $stale['headers'] ) ) $stale['headers'] = $stale['headers']->getAll();
-				if ( is_array( $stale['headers'] ) ) $stale['headers']['X-WPWS-Cache-Control'] = 'Cache-refreshed (304)';
-				return $stale;
+				return new WP_Error( 'wpws_http_error', 'HTTP 304 but no cached copy available' );
 			}
-			return new WP_Error( 'wpws_http_error', 'HTTP 304 but no stale cache available' );
-		}
 
-		// ── HTTP error: try stale before giving up ────────────────────────────
-		if ( $response_code >= 400 ) {
-			$stale = $skip_cache ? false : get_transient( $stale_key );
-			if ( $stale !== false && is_array( $stale ) ) {
-				if ( is_object( $stale['headers'] ) ) $stale['headers'] = $stale['headers']->getAll();
-				if ( is_array( $stale['headers'] ) ) $stale['headers']['X-WPWS-Cache-Control'] = 'Stale-cache (HTTP ' . $response_code . ')';
-				return $stale;
+			if ( $code >= 400 ) {
+				if ( $entry ) return self::_cache_to_response( $entry, 'Stale-cache (HTTP ' . $code . ')' );
+				return new WP_Error( 'wpws_http_error', 'HTTP error: ' . $code );
 			}
-			return new WP_Error( 'wpws_http_error', 'HTTP error: ' . $response_code );
-		}
 
-		// ── Success: store ETag / Last-Modified for next conditional request ──
-		$response_headers = wp_remote_retrieve_headers( $response );
-		if ( is_object( $response_headers ) ) $response_headers = $response_headers->getAll();
-
-		if ( ! $skip_cache && is_array( $response_headers ) ) {
-			$etag_ttl = $ttl > 0 ? $ttl + 86400 : 86400;
-			if ( ! empty( $response_headers['etag'] ) )
-				set_transient( $etag_key, $response_headers['etag'], $etag_ttl );
-			if ( ! empty( $response_headers['last-modified'] ) )
-				set_transient( $lm_key, $response_headers['last-modified'], $etag_ttl );
+			$fresh = self::_response_to_cache( $response );
+			if ( ! $skip_cache && $ttl > 0 ) {
+				self::_cache_set( $key, $fresh, $ttl );
+			}
+			return self::_cache_to_response( $fresh, 'Remote-fetch via WP_Http' );
+		} finally {
+			if ( $locked ) self::_lock_release( $hash );
 		}
+	}
 
-		// ── Store response in main cache + stale ──────────────────────────────
-		if ( ! $skip_cache && $ttl > 0 ) {
-			set_transient( $transient, $response, $ttl );
-			set_transient( $stale_key, $response, $ttl + 86400 * 7 ); // 7-day stale window
-			set_transient( $ct_key, time(), $ttl + 86400 );
+	/**
+	 * Parse request_headers ("Name=value&Other=value") into a safe header map.
+	 * Header names must be tokens; hop-by-hop and routing headers are refused.
+	 *
+	 * @param string $raw Query-string formatted headers.
+	 * @return array name => value
+	 */
+	public static function parse_request_headers( $raw ) {
+		parse_str( (string) $raw, $pairs );
+		$blocked = array( 'host', 'content-length', 'transfer-encoding', 'connection', 'te', 'upgrade', 'proxy-authorization', 'expect' );
+		$out     = array();
+		foreach ( (array) $pairs as $name => $value ) {
+			$name = trim( (string) $name );
+			if ( ! is_string( $value ) || ! preg_match( '/^[A-Za-z0-9-]+$/', $name ) ) continue;
+			if ( in_array( strtolower( $name ), $blocked, true ) ) continue;
+			$out[ $name ] = str_replace( array( "\r", "\n" ), '', $value );
 		}
+		return $out;
+	}
 
-		if ( is_array( $response_headers ) ) {
-			$response_headers['X-WPWS-Cache-Control'] = 'Remote-fetch via WP_Http';
-			$response['headers'] = $response_headers;
+	// ── Cache helpers ────────────────────────────────────────────────────────
+
+	/** Headers worth keeping from a response (lower-case). */
+	private static $kept_headers = array( 'content-type', 'etag', 'last-modified' );
+
+	/** Slim, storable form of a WP_HTTP response. */
+	private static function _response_to_cache( $response ) {
+		$headers = array();
+		foreach ( self::$kept_headers as $h ) {
+			$v = wp_remote_retrieve_header( $response, $h );
+			if ( $v !== '' && $v !== null ) $headers[ $h ] = is_array( $v ) ? implode( ', ', $v ) : (string) $v;
 		}
-		return $response;
+		return array(
+			'v'       => 2,
+			'created' => time(),
+			'code'    => (int) wp_remote_retrieve_response_code( $response ),
+			'message' => (string) wp_remote_retrieve_response_message( $response ),
+			'headers' => $headers,
+			'body'    => (string) wp_remote_retrieve_body( $response ),
+		);
+	}
+
+	/** Rebuild a WP_HTTP-style response array from a cache entry. */
+	private static function _cache_to_response( $entry, $label ) {
+		$headers = $entry['headers'];
+		$headers['X-WPWS-Cache-Control'] = $label;
+		return array(
+			'headers'  => $headers,
+			'body'     => $entry['body'],
+			'response' => array( 'code' => $entry['code'], 'message' => $entry['message'] ),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	}
+
+	/** Store an entry for ttl + 7 days (stale window); body compressed when worthwhile. */
+	private static function _cache_set( $key, $entry, $ttl ) {
+		$stored = $entry;
+		if ( strlen( $entry['body'] ) > 1024 && function_exists( 'gzcompress' ) ) {
+			// base64: wp_options.option_value is a text column; raw gzip bytes
+			// are not valid UTF-8 and could be mangled by the DB layer.
+			$stored['body'] = base64_encode( gzcompress( $entry['body'], 6 ) );
+			$stored['gz']   = 1;
+		}
+		set_transient( $key, $stored, $ttl + 7 * DAY_IN_SECONDS );
+	}
+
+	/** Load and decode an entry; null if missing or unreadable. */
+	private static function _cache_get( $key ) {
+		$e = get_transient( $key );
+		if ( ! is_array( $e ) || ! isset( $e['v'], $e['created'], $e['body'] ) || (int) $e['v'] !== 2 ) {
+			return null;
+		}
+		if ( ! empty( $e['gz'] ) ) {
+			$raw = base64_decode( $e['body'], true );
+			$raw = $raw === false ? false : @gzuncompress( $raw );
+			if ( $raw === false ) return null;
+			$e['body'] = $raw;
+			unset( $e['gz'] );
+		}
+		return $e;
+	}
+
+	/**
+	 * Try to take the refresh lock for a cache entry. Atomic: object cache
+	 * add() or INSERT IGNORE on a unique option_name. A lock older than $ttl
+	 * seconds (crashed process) is taken over with a compare-and-set UPDATE.
+	 */
+	private static function _lock_acquire( $hash, $ttl ) {
+		$name = 'wpws_lock_' . $hash;
+		$now  = time();
+		if ( function_exists( 'wp_using_ext_object_cache' ) && wp_using_ext_object_cache() ) {
+			return wp_cache_add( $name, $now, 'wpws_lock', $ttl );
+		}
+		global $wpdb;
+		$wpdb->query( $wpdb->prepare(
+			"INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')",
+			$name, (string) $now
+		) );
+		if ( (int) $wpdb->rows_affected === 1 ) {
+			return true;
+		}
+		$held_since = (int) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name ) );
+		if ( $held_since > 0 && ( $now - $held_since ) > $ttl ) {
+			$wpdb->query( $wpdb->prepare(
+				"UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+				(string) $now, $name, (string) $held_since
+			) );
+			return (int) $wpdb->rows_affected === 1;
+		}
+		return false;
+	}
+
+	private static function _lock_release( $hash ) {
+		$name = 'wpws_lock_' . $hash;
+		if ( function_exists( 'wp_using_ext_object_cache' ) && wp_using_ext_object_cache() ) {
+			wp_cache_delete( $name, 'wpws_lock' );
+			return;
+		}
+		global $wpdb;
+		$wpdb->delete( $wpdb->options, array( 'option_name' => $name ) );
+	}
+
+	/** Queue a WP-Cron refresh for an entry that is about to expire. */
+	private static function _schedule_background_refresh( $hash, $url, $request_args, $ttl ) {
+		$req_key = 'wpws_req_' . $hash;
+		if ( get_transient( $req_key ) ) return;
+		$args = $request_args;
+		unset( $args['headers']['If-None-Match'], $args['headers']['If-Modified-Since'] );
+		set_transient( $req_key, array( 'url' => $url, 'args' => $args, 'ttl' => $ttl ), 300 );
+		if ( ! wp_next_scheduled( 'wpws_background_refresh', array( $hash ) ) ) {
+			wp_schedule_single_event( time() + 1, 'wpws_background_refresh', array( $hash ) );
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -1083,7 +1316,12 @@ class WP_Web_Scraper {
 
 		$wpws_options = get_option( 'wpws_options', array() );
 		$default_args = array(
+			// Legacy name: despite "headers", this is a POST body (query string).
 			'headers'            => '',
+			// Query string sent as POST body; the request becomes a POST.
+			'post_body'          => '',
+			// Extra HTTP request headers as a query string, e.g. "Accept=application/json&X-Foo=bar".
+			'request_headers'    => '',
 			'cache'              => isset( $wpws_options['cache'] ) ? absint( $wpws_options['cache'] ) : 60,
 			'useragent'          => isset( $wpws_options['useragent'] ) ? sanitize_text_field( $wpws_options['useragent'] ) : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
 			'timeout'            => isset( $wpws_options['timeout'] ) ? absint( $wpws_options['timeout'] ) : 2,
@@ -1191,26 +1429,24 @@ class WP_Web_Scraper {
 
 	/** Called by WP-Cron to silently refresh a cached response before it expires. */
 	public static function background_refresh( $hash ) {
+		$hash = preg_replace( '/[^a-f0-9]/', '', (string) $hash );
 		$req_key  = 'wpws_req_' . $hash;
 		$req_data = get_transient( $req_key );
 		delete_transient( $req_key );
 
 		if ( ! is_array( $req_data ) || empty( $req_data['url'] ) ) return;
+		if ( ! self::_lock_acquire( $hash, 60 ) ) return; // a visitor is already refreshing
 
-		// Skip cache read so we always get a fresh copy
-		$fetch_args                 = $req_data['args'];
-		$fetch_args['cache']        = 0;
-		$fetch_args['background_refresh'] = 0; // no recursion
-
-		$response = self::_http_request_ssrf_safe( $req_data['url'], $fetch_args );
-		if ( is_wp_error( $response ) ) return;
-		$code = wp_remote_retrieve_response_code( $response );
-		if ( $code >= 400 || $code === 304 ) return;
-
-		$ttl = (int) $req_data['ttl'];
-		set_transient( $req_data['transient'], $response, $ttl );
-		set_transient( $req_data['stale_key'], $response, $ttl + 86400 * 7 );
-		set_transient( $req_data['ct_key'], time(), $ttl + 86400 );
+		try {
+			$fetch_args = $req_data['args'];
+			$response   = self::_http_request_ssrf_safe( $req_data['url'], $fetch_args );
+			if ( is_wp_error( $response ) ) return;
+			$code = (int) wp_remote_retrieve_response_code( $response );
+			if ( $code < 200 || $code >= 300 ) return;
+			self::_cache_set( 'wpws_c_' . $hash, self::_response_to_cache( $response ), (int) $req_data['ttl'] );
+		} finally {
+			self::_lock_release( $hash );
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -1248,6 +1484,9 @@ class WP_Web_Scraper {
 
 	/** Render callback for the Gutenberg block (server-side render). */
 	public static function render_block( $attributes ) {
+		if ( ! self::author_can_scrape() ) {
+			return self::_not_permitted();
+		}
 		$url   = isset( $attributes['url'] )   ? $attributes['url']   : '';
 		$query = isset( $attributes['query'] ) ? $attributes['query'] : '';
 		$args  = array_diff_key( $attributes, array_flip( array( 'url', 'query' ) ) );

@@ -782,30 +782,30 @@ class WP_Web_Scraper_Security {
 			return array( 'valid' => false, 'error' => 'HTML contains null bytes' );
 		}
 		
-		// Check for extremely deep nesting (potential DoS)
-		$depth = 0;
-		$max_depth = 0;
-		$len = strlen( $html );
-		for ( $i = 0; $i < $len; $i++ ) {
-			if ( $html[$i] === '<' && $i + 1 < $len && $html[$i + 1] !== '/' && $html[$i + 1] !== '!' ) {
-				$depth++;
-				$max_depth = max( $max_depth, $depth );
-				if ( $max_depth > self::MAX_DOM_DEPTH ) {
-					return array( 'valid' => false, 'error' => 'HTML contains excessive nesting depth' );
+		// Nesting depth (DoS guard for the DOM parser). Only elements that can
+		// contain others count: void elements (<br>, <img>, <meta>, <input>…)
+		// and self-closing tags never get a closing tag, so counting them made
+		// any page with >1000 images/line breaks look "too deeply nested".
+		// Comments, doctype and processing instructions are skipped.
+		$void = array( 'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr' );
+		if ( preg_match_all( '#<(/?)([a-zA-Z][a-zA-Z0-9:-]*)[^>]*?(/?)>#', $html, $tags, PREG_SET_ORDER ) ) {
+			$depth = 0;
+			foreach ( $tags as $t ) {
+				$name = strtolower( $t[2] );
+				if ( $t[1] === '/' ) {
+					$depth = max( 0, $depth - 1 );
+				} elseif ( $t[3] !== '/' && ! in_array( $name, $void, true ) ) {
+					if ( ++$depth > self::MAX_DOM_DEPTH ) {
+						return array( 'valid' => false, 'error' => 'HTML contains excessive nesting depth' );
+					}
 				}
-			} elseif ( $html[$i] === '<' && $i + 1 < $len && $html[$i + 1] === '/' ) {
-				$depth = max( 0, $depth - 1 );
 			}
 		}
-		
-		// Check for extremely long lines (potential DoS)
-		$lines = explode( "\n", $html );
-		foreach ( $lines as $line ) {
-			if ( strlen( $line ) > 100000 ) { // 100KB per line
-				return array( 'valid' => false, 'error' => 'HTML contains excessively long lines' );
-			}
-		}
-		
+
+		// No per-line length limit: minified HTML and JSON are routinely a
+		// single line far over the old 100 KB cap, and total size is already
+		// bounded by MAX_RESPONSE_SIZE.
+
 		return array( 'valid' => true, 'error' => '' );
 	}
 	

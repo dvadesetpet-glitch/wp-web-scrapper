@@ -19,5 +19,10 @@ $RECYCLE.BIN/
 *.tmp
 *.bak
 
-# PHP / Composer (vendor is committed on purpose so the plugin runs as-is)
+# PHP / Composer
+# Dependencies ship namespace-prefixed in vendor-prefixed/ (committed, built by
+# Strauss). vendor/ is only a Composer work dir, except the hand-bundled phpuri.
+/vendor/*
+!/vendor/phpuri/
 .phpunit.result.cache
+/strauss.phar

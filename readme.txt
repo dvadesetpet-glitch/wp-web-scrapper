@@ -4,7 +4,7 @@ Tags: web scraping, css selector, xpath, regex, realtime, shortcode, atom, rss, 
 Requires at least: 5.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.3
+Stable tag: 1.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,18 @@ Based on the original [WP Web Scraper](https://wordpress.org/plugins/wp-web-scra
 3. Configure defaults under Settings → WP WS Reborn 2026; use the Sandbox tab to test shortcodes
 
 == Changelog ==
+
+= 1.4 =
+* Security: the admin Sandbox renders scraped HTML in a fully sandboxed iframe (plus an escaped source view). Previously the remote page's HTML was echoed into wp-admin, so with "Sanitize HTML Output" off a tested site could run JavaScript in the administrator's session.
+* Security: error messages and the debug comment are shown only to users who can edit posts (filter `wpws_show_errors`); visitors no longer see HTTP codes, blocked hosts or rate-limit notices. Errors are escaped; custom `on_error` text goes through wp_kses_post. `[wpws_atom_*]` diagnostic HTML comments follow the same rule.
+* Security: shortcodes and blocks run only in content whose author has `edit_others_posts` (filter `wpws_required_capability`); previews and block-editor renders also check the current user. Contributors can no longer use the site to fetch arbitrary URLs. **Breaking** for existing posts by Authors/Contributors that use the scraper.
+* Security: stored auth-profile secrets are never sent to the browser; the settings field shows `********` and keeps the saved value unless you replace it.
+* Performance: the cache stores one slim, gzip-compressed entry per request instead of the full response object twice (main + 7-day stale copy, with the body duplicated inside the object). Old v1 cache rows are removed automatically on upgrade.
+* Performance: stampede protection — when an entry expires only one request refreshes it (atomic lock, crash-safe takeover); concurrent visitors get the previous copy instead of all hitting the remote site and the rate limit.
+* Feature: `post_body` (clear name for the old `headers` argument, which is really a POST body and still works) and `request_headers` for actual HTTP request headers.
+* Fix: HTML validation no longer rejects normal pages — void elements (`<img>`, `<br>`, `<meta>`…) were counted as nesting (pages with >1000 images failed), and any single line over 100 KB (all minified HTML/JSON) was rejected. Real deep nesting is still blocked.
+* Compatibility: bundled symfony/css-selector is namespace-prefixed with Strauss (`WPWS\Vendor\…`) so it cannot clash with another plugin's copy.
+* New: `uninstall.php` removes options, cache, AJAX jobs, locks, rate-limit counters and scheduled refreshes (multisite-aware).
 
 = 1.3 =
 * Dependencies: symfony/css-selector 2.5.5 (2014) → 5.4 (LTS line that still supports PHP 7.4). Removes the PHP 8.4 deprecation notices ("implicitly marking parameter as nullable", "strtolower(): Passing null"). Parser now uses CssSelectorConverter and catches all Throwables from invalid selectors.

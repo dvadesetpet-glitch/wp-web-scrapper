@@ -112,7 +112,7 @@ class WP_Web_Scraper_Admin {
 					'callback' => array('WP_Web_Scraper_Admin', 'fields_cb'), 'page' => 'wp_web_scraper_settings',
 					'section' => 'section_security',
 					'args' => array( 'id' => 'auth_profiles', 'type' => 'textarea',
-						'description' => __('One profile per line: <code>name | bearer | TOKEN</code>, <code>name | basic | USER | PASSWORD</code> or <code>name | header | X-Api-Key | VALUE</code>. Use it with <code>auth_profile="name"</code> in shortcodes and blocks so credentials are not stored in post content. Lines starting with # are ignored. Developers can supply profiles via the <code>wpws_auth_profiles</code> filter instead.', 'wp-web-scraper') ) ),
+						'description' => __('Secrets are shown as <code>********</code>; leave that as is to keep the saved value, or replace it to change it. One profile per line: <code>name | bearer | TOKEN</code>, <code>name | basic | USER | PASSWORD</code> or <code>name | header | X-Api-Key | VALUE</code>. Use it with <code>auth_profile="name"</code> in shortcodes and blocks so credentials are not stored in post content. Lines starting with # are ignored. Developers can supply profiles via the <code>wpws_auth_profiles</code> filter instead.', 'wp-web-scraper') ) ),
 				// Rate limiting fields
 				array( 'id' => 'rate_limit_max', 'title' => __('Max Requests', 'wp-web-scraper'),
 					'callback' => array('WP_Web_Scraper_Admin', 'fields_cb'), 'page' => 'wp_web_scraper_settings',
@@ -151,6 +151,66 @@ class WP_Web_Scraper_Admin {
 		register_setting( $settings['option_group'], $settings['option_group'], array(
 			'sanitize_callback' => array( 'WP_Web_Scraper_Admin', 'sanitize_options' ),
 		) );
+	}
+
+	/** Placeholder shown instead of stored secrets. */
+	const SECRET_MASK = '********';
+
+	/**
+	 * Replace the secret part of each auth profile line with SECRET_MASK.
+	 *   name | bearer | TOKEN          → name | bearer | ********
+	 *   name | basic  | USER | PASS    → name | basic | USER | ********
+	 *   name | header | NAME | VALUE   → name | header | NAME | ********
+	 *
+	 * @param string $raw Stored setting.
+	 * @return string
+	 */
+	public static function mask_auth_profiles( $raw ) {
+		$out = array();
+		foreach ( preg_split( '/\r\n|\r|\n/', $raw ) as $line ) {
+			$t = trim( $line );
+			if ( $t === '' || $t[0] === '#' ) { $out[] = $line; continue; }
+			$parts = array_map( 'trim', explode( '|', $t ) );
+			$type  = isset( $parts[1] ) ? strtolower( $parts[1] ) : '';
+			$keep  = $type === 'bearer' ? 2 : ( in_array( $type, array( 'basic', 'header' ), true ) ? 3 : count( $parts ) );
+			$out[] = implode( ' | ', array_merge( array_slice( $parts, 0, $keep ), count( $parts ) > $keep ? array( self::SECRET_MASK ) : array() ) );
+		}
+		return implode( "\n", $out );
+	}
+
+	/**
+	 * Put stored secrets back into lines submitted with SECRET_MASK, matching
+	 * on profile name + type (+ user/header name). A changed user or header
+	 * name therefore requires re-entering the secret.
+	 *
+	 * @param string $submitted Lines from the form.
+	 * @param string $stored    Previously saved setting.
+	 * @return string
+	 */
+	public static function unmask_auth_profiles( $submitted, $stored ) {
+		$previous = array();
+		foreach ( preg_split( '/\r\n|\r|\n/', (string) $stored ) as $line ) {
+			$parts = array_map( 'trim', explode( '|', trim( $line ) ) );
+			if ( count( $parts ) < 3 ) continue;
+			$type = strtolower( $parts[1] );
+			$id   = strtolower( $parts[0] ) . '|' . $type . ( in_array( $type, array( 'basic', 'header' ), true ) ? '|' . $parts[2] : '' );
+			$previous[ $id ] = $parts;
+		}
+		$out = array();
+		foreach ( preg_split( '/\r\n|\r|\n/', (string) $submitted ) as $line ) {
+			$parts = array_map( 'trim', explode( '|', trim( $line ) ) );
+			if ( count( $parts ) >= 3 && end( $parts ) === self::SECRET_MASK ) {
+				$type = strtolower( $parts[1] );
+				$id   = strtolower( $parts[0] ) . '|' . $type . ( in_array( $type, array( 'basic', 'header' ), true ) ? '|' . $parts[2] : '' );
+				if ( isset( $previous[ $id ] ) ) {
+					$line = implode( ' | ', $previous[ $id ] );
+				} else {
+					continue; // masked but nothing to restore: drop rather than save "********"
+				}
+			}
+			$out[] = $line;
+		}
+		return implode( "\n", $out );
 	}
 
 	/**
@@ -200,6 +260,8 @@ class WP_Web_Scraper_Admin {
 		// Auth profiles: keep only lines that parse; report the rest.
 		$kept = array(); $dropped = 0;
 		$raw  = isset( $input['auth_profiles'] ) ? (string) $input['auth_profiles'] : '';
+		$old  = get_option( 'wpws_options', array() );
+		$raw  = self::unmask_auth_profiles( $raw, isset( $old['auth_profiles'] ) ? (string) $old['auth_profiles'] : '' );
 		foreach ( preg_split( '/\r\n|\r|\n/', $raw ) as $line ) {
 			$line = trim( wp_strip_all_tags( $line ) );
 			if ( $line === '' ) continue;
@@ -279,6 +341,10 @@ class WP_Web_Scraper_Admin {
 			if( $option['type'] === 'text' ){
 				echo '<input name="'.WP_Web_Scraper_Admin::$settings['option_group'].'['.$option_id.']" type="text" id="'.$option_id.'" class="regular-text" value="'.esc_attr($option_value).'" />';
 			}
+			if( $option['type'] === 'textarea' && $option_id === 'auth_profiles' ){
+				// Secrets are never sent back to the browser; "********" keeps the stored value.
+				$option_value = self::mask_auth_profiles( (string) $option_value );
+			}
 			if( $option['type'] === 'textarea' ){
 				echo '<textarea name="'.WP_Web_Scraper_Admin::$settings['option_group'].'['.$option_id.']" id="'.$option_id.'" class="large-text" rows="5">'.esc_textarea($option_value).'</textarea>';
 			}
@@ -302,6 +368,31 @@ class WP_Web_Scraper_Admin {
 		}
 		echo '</fieldset>';
 		
+	}
+
+	/**
+	 * Render scraped HTML for the Sandbox inside a fully sandboxed iframe.
+	 *
+	 * The Sandbox used to echo remote HTML straight into wp-admin. With
+	 * "Sanitize HTML Output" off, any site being tested could run JavaScript
+	 * in the administrator's session (read nonces, create users…). The
+	 * iframe has an empty sandbox attribute: no scripts, no same-origin
+	 * access, no forms, no top-level navigation. The raw source is shown
+	 * escaped underneath.
+	 *
+	 * @param string $html Scraped output.
+	 * @return string
+	 */
+	public static function sandboxed_preview( $html ) {
+		$html = (string) $html;
+		$doc  = '<!doctype html><meta charset="utf-8"><base target="_blank">'
+			. '<style>body{font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:8px}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:2px 6px}img{max-width:100%}</style>'
+			. $html;
+		return '<iframe class="wpws-sandbox-frame" sandbox="" referrerpolicy="no-referrer" title="' . esc_attr__( 'Scraped output (sandboxed)', 'wp-web-scraper' ) . '"'
+			. ' style="width:100%;height:360px;resize:vertical;overflow:auto;background:#fff;border:1px solid #ccc"'
+			. ' srcdoc="' . esc_attr( $doc ) . '"></iframe>'
+			. '<details style="margin-top:6px"><summary>' . esc_html__( 'HTML source', 'wp-web-scraper' ) . '</summary>'
+			. '<pre style="white-space:pre-wrap;word-break:break-all;max-height:300px;overflow:auto;background:#f6f7f7;padding:8px">' . esc_html( $html ) . '</pre></details>';
 	}
 
 	// -------------------------------------------------------------------------

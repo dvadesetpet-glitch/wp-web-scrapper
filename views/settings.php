@@ -116,9 +116,7 @@
                             </div>
                             <div style="background: #f5f5f5; padding: 15px; border: 1px solid #ddd;">
                                 <h4><?php _e( 'Output:', 'wp-web-scraper' ); ?></h4>
-                                <div style="padding: 10px; background: #fff; border: 1px solid #ccc; min-height: 50px;">
-                                    <?php echo $result_output; ?>
-                                </div>
+                                <?php echo WP_Web_Scraper_Admin::sandboxed_preview( $result_output ); ?>
                             </div>
                         </div>
                     <?php else : ?>
@@ -132,7 +130,7 @@
                             </ul>
 
                             <div id="output" class="tabs-panel">
-                                <?php echo $result_output?>
+                                <?php echo WP_Web_Scraper_Admin::sandboxed_preview( $result_output ); ?>
                             </div>		
 
                             <div id="shortcode" class="tabs-panel">
@@ -379,7 +377,8 @@
                         <li><code>cache="60"</code> - cache timeout in minutes (default: 60)</li>
                         <li><code>timeout="10"</code> - request timeout in seconds (default: 10, minimum 5)</li>
                         <li><code>useragent</code> – custom User-Agent (default: latest Chrome desktop)</li>
-                        <li><code>headers="key1=value1&key2=value2"</code> – extra POST body (query string); request becomes POST</li>
+                        <li><code>post_body="key1=value1&key2=value2"</code> – POST body (query string); request becomes POST (<code>headers</code> = old name, still works)</li>
+                        <li><code>request_headers="Accept=application/json"</code> – extra HTTP request headers (query string)</li>
                         <li><code>auth_profile="name"</code> – HTTP authentication using a profile from Settings → Authentication profiles (recommended; legacy inline <code>auth_type</code>/<code>auth_token</code>/<code>auth_user</code>/<code>auth_pass</code> still work but store secrets in post content)</li>
                         <li><code>mobile="1"</code> + <code>mobile_type="iphone"</code> (android/iphone/ipad/generic) – request the mobile version</li>
                         <li><code>ajax="1"</code> – lazy-load via AJAX after page render; <code>background_refresh="1"</code> – stale-while-revalidate cache refresh via WP-Cron</li>
@@ -389,8 +388,8 @@
                     <ul>
                         <li><code>output="html"</code> - HTML format (default) or <code>output="text"</code> - text only without HTML tags</li>
                         <li><code>glue="&lt;br&gt;"</code> - string to join multiple results (default: new line)</li>
-                        <li><code>debug="1"</code> - displays debug information in HTML comment (default: 0)</li>
-                        <li><code>on_error="error_show"</code> - displays error or <code>on_error="error_hide"</code> - hides error</li>
+                        <li><code>debug="1"</code> - debug information in an HTML comment, for logged-in editors only (default: 0)</li>
+                        <li><code>on_error="error_show"</code> - shows the error to logged-in editors only (visitors see nothing), <code>on_error="error_hide"</code> - hides it, any other text - shown to everyone</li>
                     </ul>
                     
                     <h4>Filter Arguments (filtering results)</h4>

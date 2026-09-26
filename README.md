@@ -26,8 +26,16 @@ or [`help-files/html/wpws-guide.html`](help-files/html/wpws-guide.html) for the 
 
 ## Development
 
-Requires PHP 7.4+. `vendor/` is committed so the plugin runs without Composer; after changing
-dependencies run `composer install --no-dev` and commit `vendor/`.
+Requires PHP 7.4+. Dependencies ship **namespace-prefixed** in `vendor-prefixed/` (committed), so the
+plugin runs without Composer and cannot clash with other plugins' copies. After changing dependencies:
+
+```sh
+composer install --no-dev
+php strauss.phar          # https://github.com/BrianHenryIE/strauss/releases — config in composer.json "extra.strauss"
+```
+
+then commit `vendor-prefixed/`. `vendor/` itself is only a Composer work directory (ignored, except the
+hand-bundled `vendor/phpuri/`).
 
 Unit tests (no WordPress needed — `tests/bootstrap.php` stubs the few WP functions used):
 

@@ -1,7 +1,10 @@
 <?php
 
-require_once __DIR__ . '/vendor/autoload.php';
-use Symfony\Component\CssSelector\CssSelectorConverter;
+// Bundled dependencies are namespace-prefixed (WPWS\Vendor\…) with Strauss so
+// they cannot clash with a different symfony/css-selector loaded by another
+// plugin. Rebuild with: composer install --no-dev && php strauss.phar
+require_once __DIR__ . '/vendor-prefixed/autoload.php';
+use WPWS\Vendor\Symfony\Component\CssSelector\CssSelectorConverter;
 
 class WP_Web_Scraper_Parser {
 	
