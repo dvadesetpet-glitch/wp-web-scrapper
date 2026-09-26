@@ -23,10 +23,16 @@ class WP_Web_Scraper_Security {
 	 * Extend with the "wpws_allowed_callbacks" filter.
 	 */
 	private static $builtin_allowed_callbacks = array(
-		// Plugin helpers (see wpws.php).
-		'wpws_filter_table', 'wpws_filter_table_advanced',
+		// Plugin helpers (see wpws.php). Listed explicitly — there is no
+		// "any wpws_* function" wildcard, because that also matched functions
+		// such as wpws_get_content() that fetch URLs.
+		'wpws_filter_table', 'wpws_filter_table_advanced', 'wpws_filter_table_exclude',
 		'wpws_keep_first_n_columns', 'wpws_keep_first_n_rows',
+		'wpws_keep_columns', 'wpws_drop_columns', 'wpws_keep_rows', 'wpws_drop_rows',
 		'wpws_keep_mobile_table_columns', 'wpws_bold_words', 'wpws_bold_gorica',
+		'wpws_keep_3_cols_3_rows', 'wpws_keep_4_cols_3_rows', 'wpws_keep_3_cols_5_rows',
+		'wpws_keep_4_cols_5_rows', 'wpws_keep_3_cols_4_rows', 'wpws_keep_4_cols_4_rows',
+		'wpws_keep_5_cols_3_rows', 'wpws_keep_5_cols_4_rows', 'wpws_keep_5_cols_5_rows',
 		// Harmless WordPress / PHP text helpers.
 		'strip_tags', 'wp_strip_all_tags', 'trim', 'wptexturize',
 		'esc_html', 'sanitize_text_field', 'wpautop',
@@ -170,15 +176,18 @@ class WP_Web_Scraper_Security {
 			}
 		}
 		
-		// SSRF protection
+		// SSRF protection. 'ips' are the addresses that passed the check; the
+		// caller pins the connection to them so DNS cannot change in between.
+		$ips = array();
 		if ( ! $options['allow_localhost'] ) {
 			$ssrf_check = self::check_ssrf_protection( $host );
 			if ( ! $ssrf_check['allowed'] ) {
 				return array( 'valid' => false, 'error' => $ssrf_check['error'] );
 			}
+			$ips = isset( $ssrf_check['ips'] ) ? $ssrf_check['ips'] : array();
 		}
-		
-		return array( 'valid' => true, 'error' => '' );
+
+		return array( 'valid' => true, 'error' => '', 'ips' => $ips );
 	}
 	
 	/**
@@ -242,21 +251,23 @@ class WP_Web_Scraper_Security {
 			}
 		}
 
-		// If nothing resolved, let the HTTP layer fail naturally rather than
-		// block a possibly-legitimate host on a resolver hiccup.
+		// Nothing resolved: block. The connection is pinned to the IPs checked
+		// here (see WP_Web_Scraper::_http_request_ssrf_safe), so an unresolved
+		// host would let the HTTP layer do its own, unchecked lookup — the gap a
+		// DNS-rebinding server exploits (empty/public answer now, private later).
 		if ( empty( $ips ) ) {
-			return $resolved[ $host ] = array( 'allowed' => true, 'error' => '' );
+			return $resolved[ $host ] = array( 'allowed' => false, 'error' => 'Could not resolve host', 'ips' => array() );
 		}
 
 		foreach ( $ips as $ip ) {
 			foreach ( self::$private_ip_ranges as $range ) {
 				if ( self::ip_in_range( $ip, $range ) ) {
-					return $resolved[ $host ] = array( 'allowed' => false, 'error' => 'Access to private IP addresses is not allowed' );
+					return $resolved[ $host ] = array( 'allowed' => false, 'error' => 'Access to private IP addresses is not allowed', 'ips' => array() );
 				}
 			}
 		}
 
-		$result = array( 'allowed' => true, 'error' => '' );
+		$result = array( 'allowed' => true, 'error' => '', 'ips' => array_values( array_unique( $ips ) ) );
 		$resolved[ $host ] = $result;
 		return $result;
 	}
@@ -478,13 +489,6 @@ class WP_Web_Scraper_Security {
 			}
 		}
 
-		// Any function in the plugin/extension "wpws_" namespace is allowed:
-		// defining such a function already requires code-level (theme/plugin)
-		// access, which is a higher privilege than writing a shortcode.
-		if ( preg_match( '/^wpws_[a-z0-9_]+$/', $name ) ) {
-			return array( 'valid' => true, 'error' => '' );
-		}
-
 		return array(
 			'valid' => false,
 			'error' => 'Callback "' . $callback . '" is not allow-listed. Register it via the "wpws_allowed_callbacks" filter.',
@@ -504,7 +508,91 @@ class WP_Web_Scraper_Security {
 		 *
 		 * @param array $callbacks Function names.
 		 */
-		return (array) apply_filters( 'wpws_allowed_callbacks', self::$builtin_allowed_callbacks );
+		$callbacks = self::$builtin_allowed_callbacks;
+		// Named shortcut helpers: wpws_keep_first_{3..10}_columns / _rows.
+		for ( $n = 3; $n <= 10; $n++ ) {
+			$callbacks[] = 'wpws_keep_first_' . $n . '_columns';
+			$callbacks[] = 'wpws_keep_first_' . $n . '_rows';
+		}
+		return (array) apply_filters( 'wpws_allowed_callbacks', $callbacks );
+	}
+
+	/**
+	 * Parse the "Authentication profiles" setting into an array keyed by name.
+	 *
+	 * One profile per line, fields separated by "|":
+	 *   name | bearer | TOKEN
+	 *   name | basic  | USER | PASSWORD
+	 *   name | header | Header-Name | VALUE
+	 *
+	 * Lets shortcodes/blocks say auth_profile="name" instead of embedding the
+	 * secret in post content (visible to every editor and in every revision).
+	 *
+	 * @param string|null $raw           Raw setting text; null = read from saved options.
+	 * @param bool        $apply_filters Whether to run the wpws_auth_profiles filter.
+	 * @return array name => array( 'type' => ..., ... )
+	 */
+	public static function parse_auth_profiles( $raw = null, $apply_filters = true ) {
+		if ( $raw === null ) {
+			$wpws_options = get_option( 'wpws_options', array() );
+			$raw = isset( $wpws_options['auth_profiles'] ) ? (string) $wpws_options['auth_profiles'] : '';
+		}
+
+		$profiles = array();
+		foreach ( preg_split( '/\r\n|\r|\n/', (string) $raw ) as $line ) {
+			$line = trim( $line );
+			if ( $line === '' || $line[0] === '#' ) continue;
+
+			$parts = array_map( 'trim', explode( '|', $line ) );
+			$name  = strtolower( $parts[0] );
+			$type  = isset( $parts[1] ) ? strtolower( $parts[1] ) : '';
+			if ( ! preg_match( '/^[a-z0-9_-]+$/', $name ) ) continue;
+
+			if ( $type === 'bearer' && isset( $parts[2] ) && $parts[2] !== '' ) {
+				$profiles[ $name ] = array( 'type' => 'bearer', 'token' => $parts[2] );
+			} elseif ( $type === 'basic' && isset( $parts[2] ) && $parts[2] !== '' ) {
+				// Password may itself contain "|": re-join the remainder.
+				$pass = count( $parts ) > 3 ? implode( '|', array_slice( $parts, 3 ) ) : '';
+				$profiles[ $name ] = array( 'type' => 'basic', 'user' => $parts[2], 'pass' => $pass );
+			} elseif ( $type === 'header' && isset( $parts[2], $parts[3] )
+				&& preg_match( '/^[A-Za-z0-9-]+$/', $parts[2] ) ) {
+				$profiles[ $name ] = array( 'type' => 'header', 'header' => $parts[2], 'value' => implode( '|', array_slice( $parts, 3 ) ) );
+			}
+		}
+
+		if ( ! $apply_filters ) {
+			return $profiles;
+		}
+
+		/**
+		 * Filter the authentication profiles. Use this to supply secrets from
+		 * wp-config.php constants or environment variables instead of the DB.
+		 *
+		 * @param array $profiles name => profile array.
+		 */
+		return (array) apply_filters( 'wpws_auth_profiles', $profiles );
+	}
+
+	/**
+	 * Whether a single settings line is a valid authentication profile.
+	 *
+	 * @param string $line One line of the auth_profiles setting.
+	 * @return bool
+	 */
+	public static function parse_auth_profiles_line_is_valid( $line ) {
+		return count( self::parse_auth_profiles( (string) $line, false ) ) === 1;
+	}
+
+	/**
+	 * Look up a single authentication profile by name.
+	 *
+	 * @param string $name Profile name.
+	 * @return array|null Profile or null if unknown.
+	 */
+	public static function get_auth_profile( $name ) {
+		$name     = strtolower( trim( (string) $name ) );
+		$profiles = self::parse_auth_profiles();
+		return isset( $profiles[ $name ] ) ? $profiles[ $name ] : null;
 	}
 	
 	/**
@@ -580,29 +668,62 @@ class WP_Web_Scraper_Security {
 			return array( 'allowed' => true, 'error' => '' );
 		}
 		
-		$cache_key = 'wpws_rate_limit_' . md5( $identifier );
-		$requests = get_transient( $cache_key );
-		
-		if ( $requests === false ) {
-			$requests = array();
-		}
-		
-		// Remove old requests outside the window
-		$current_time = time();
-		$requests = array_filter( $requests, function( $timestamp ) use ( $current_time, $window ) {
-			return ( $current_time - $timestamp ) < $window;
-		} );
-		
-		// Check if limit exceeded
-		if ( count( $requests ) >= $max_requests ) {
+		// Fixed-window counter, incremented atomically. The previous
+		// get_transient → modify → set_transient sequence lost updates when
+		// requests ran concurrently, so parallel requests could exceed the limit.
+		$count = self::_rate_limit_increment( $identifier, $window );
+
+		if ( $count > $max_requests ) {
 			return array( 'allowed' => false, 'error' => 'Rate limit exceeded. Please try again later.' );
 		}
-		
-		// Add current request
-		$requests[] = $current_time;
-		set_transient( $cache_key, $requests, $window );
-		
+
 		return array( 'allowed' => true, 'error' => '' );
+	}
+
+	/**
+	 * Atomically increment and return the request counter for the current
+	 * time window of $identifier.
+	 *
+	 * Uses the persistent object cache (wp_cache_incr) when one is installed,
+	 * otherwise a single atomic INSERT … ON DUPLICATE KEY UPDATE on wp_options.
+	 *
+	 * @param string $identifier Rate-limit subject (e.g. remote host).
+	 * @param int    $window     Window length in seconds.
+	 * @return int Requests counted in the current window, including this one.
+	 */
+	private static function _rate_limit_increment( $identifier, $window ) {
+		$bucket = (int) floor( time() / $window );
+		$base   = 'wpws_rl_' . md5( $identifier );
+		$name   = $base . '_' . $bucket;
+
+		if ( function_exists( 'wp_using_ext_object_cache' ) && wp_using_ext_object_cache() ) {
+			wp_cache_add( $name, 0, 'wpws_rate_limit', $window * 2 );
+			$count = wp_cache_incr( $name, 1, 'wpws_rate_limit' );
+			return $count === false ? 1 : (int) $count;
+		}
+
+		global $wpdb;
+		// LAST_INSERT_ID(expr) makes the incremented value available via
+		// insert_id in the same statement, so read-and-increment is atomic.
+		$wpdb->query( $wpdb->prepare(
+			"INSERT INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, '1', 'no')
+			 ON DUPLICATE KEY UPDATE option_value = LAST_INSERT_ID(option_value + 1)",
+			$name
+		) );
+
+		// rows_affected: 1 = new row inserted (first request in this window),
+		// 2 = existing row updated.
+		if ( (int) $wpdb->rows_affected === 1 ) {
+			// New window: drop this identifier's counters from older windows.
+			$wpdb->query( $wpdb->prepare(
+				"DELETE FROM {$wpdb->options} WHERE option_name LIKE %s AND option_name <> %s",
+				$wpdb->esc_like( $base . '_' ) . '%',
+				$name
+			) );
+			return 1;
+		}
+
+		return max( 1, (int) $wpdb->insert_id );
 	}
 	
 	/**
@@ -768,7 +889,9 @@ class WP_Web_Scraper_Security {
 		$estimated_memory = strlen( $content ) * 2; // Rough estimate
 		$memory_limit = ini_get( 'memory_limit' );
 		
-		if ( $memory_limit ) {
+		// "-1" means unlimited. convert_to_bytes() would return -1 and make
+		// every response look too large, so treat it (and 0) as no limit.
+		if ( $memory_limit && self::convert_to_bytes( $memory_limit ) > 0 ) {
 			$memory_limit_bytes = self::convert_to_bytes( $memory_limit );
 			$current_memory = memory_get_usage( true );
 			$available_memory = $memory_limit_bytes - $current_memory;

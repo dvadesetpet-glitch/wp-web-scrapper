@@ -9,6 +9,8 @@
 	var TextControl     = wp.components.TextControl;
 	var SelectControl   = wp.components.SelectControl;
 	var ToggleControl   = wp.components.ToggleControl;
+	var Notice          = wp.components.Notice;
+	var Button          = wp.components.Button;
 	var ServerSideRender = wp.serverSideRender;
 
 	registerBlock( 'wpws/scraper', {
@@ -22,6 +24,8 @@
 			query_type        : { type: 'string',  default: 'cssselector' },
 			cache             : { type: 'integer', default: 60 },
 			output            : { type: 'string',  default: 'html' },
+			auth_profile      : { type: 'string',  default: '' },
+			// Legacy inline credentials — kept so existing blocks still render.
 			auth_type         : { type: 'string',  default: 'none' },
 			auth_user         : { type: 'string',  default: '' },
 			auth_pass         : { type: 'string',  default: '' },
@@ -32,6 +36,7 @@
 		edit: function ( props ) {
 			var attr    = props.attributes;
 			var setAttr = props.setAttributes;
+			var hasLegacySecrets = !! ( attr.auth_user || attr.auth_pass || attr.auth_token );
 
 			var inspector = el( InspectorControls, { key: 'inspector' },
 				el( PanelBody, { title: 'Source', initialOpen: true },
@@ -77,33 +82,23 @@
 						onChange: function ( v ) { setAttr( { background_refresh: v ? 1 : 0 } ); },
 					} )
 				),
-				el( PanelBody, { title: 'Authentication', initialOpen: false },
-					el( SelectControl, {
-						label   : 'Auth type',
-						value   : attr.auth_type,
-						options : [
-							{ label: 'None',   value: 'none' },
-							{ label: 'Basic',  value: 'basic' },
-							{ label: 'Bearer', value: 'bearer' },
-						],
-						onChange: function ( v ) { setAttr( { auth_type: v } ); },
+				el( PanelBody, { title: 'Authentication', initialOpen: hasLegacySecrets },
+					el( TextControl, {
+						label   : 'Auth profile',
+						help    : 'Name of a profile defined in Settings → WP WS Reborn 2026 → Authentication profiles. Credentials are no longer stored in the block.',
+						value   : attr.auth_profile,
+						onChange: function ( v ) { setAttr( { auth_profile: v } ); },
 					} ),
-					attr.auth_type === 'basic' && el( TextControl, {
-						label   : 'Username',
-						value   : attr.auth_user,
-						onChange: function ( v ) { setAttr( { auth_user: v } ); },
-					} ),
-					attr.auth_type === 'basic' && el( TextControl, {
-						label   : 'Password',
-						type    : 'password',
-						value   : attr.auth_pass,
-						onChange: function ( v ) { setAttr( { auth_pass: v } ); },
-					} ),
-					attr.auth_type === 'bearer' && el( TextControl, {
-						label   : 'Token',
-						value   : attr.auth_token,
-						onChange: function ( v ) { setAttr( { auth_token: v } ); },
-					} )
+					hasLegacySecrets && el( Notice, { status: 'warning', isDismissible: false },
+						'This block still contains a password or token saved in the post content (visible to every editor and in revisions). Move it to an auth profile, then remove it here.'
+					),
+					hasLegacySecrets && el( Button, {
+						variant : 'secondary',
+						isDestructive: true,
+						onClick : function () {
+							setAttr( { auth_type: 'none', auth_user: '', auth_pass: '', auth_token: '' } );
+						},
+					}, 'Remove stored credentials' )
 				)
 			);
 

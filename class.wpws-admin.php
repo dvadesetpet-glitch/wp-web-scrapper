@@ -108,12 +108,17 @@ class WP_Web_Scraper_Admin {
 					'section' => 'section_security', 
 					'args' => array( 'id' => 'blacklist_domains', 'type' => 'textarea', 
 						'description' => __('One domain per line. These domains will be blocked.', 'wp-web-scraper') ) ),
+				array( 'id' => 'auth_profiles', 'title' => __('Authentication profiles', 'wp-web-scraper'),
+					'callback' => array('WP_Web_Scraper_Admin', 'fields_cb'), 'page' => 'wp_web_scraper_settings',
+					'section' => 'section_security',
+					'args' => array( 'id' => 'auth_profiles', 'type' => 'textarea',
+						'description' => __('One profile per line: <code>name | bearer | TOKEN</code>, <code>name | basic | USER | PASSWORD</code> or <code>name | header | X-Api-Key | VALUE</code>. Use it with <code>auth_profile="name"</code> in shortcodes and blocks so credentials are not stored in post content. Lines starting with # are ignored. Developers can supply profiles via the <code>wpws_auth_profiles</code> filter instead.', 'wp-web-scraper') ) ),
 				// Rate limiting fields
-				array( 'id' => 'rate_limit_max', 'title' => __('Max Requests', 'wp-web-scraper'), 
-					'callback' => array('WP_Web_Scraper_Admin', 'fields_cb'), 'page' => 'wp_web_scraper_settings', 
-					'section' => 'section_rate_limiting', 
-					'args' => array( 'id' => 'rate_limit_max', 'type' => 'number', 'step' => 10, 'min' => 0, 
-						'description' => __('Maximum number of requests per time window. Set to 0 to disable rate limiting.', 'wp-web-scraper') ) ),
+				array( 'id' => 'rate_limit_max', 'title' => __('Max Requests', 'wp-web-scraper'),
+					'callback' => array('WP_Web_Scraper_Admin', 'fields_cb'), 'page' => 'wp_web_scraper_settings',
+					'section' => 'section_rate_limiting',
+					'args' => array( 'id' => 'rate_limit_max', 'type' => 'number', 'step' => 10, 'min' => 0,
+						'description' => __('Maximum number of outgoing requests per remote host per time window (cache hits are not counted). Set to 0 to disable rate limiting.', 'wp-web-scraper') ) ),
 				array( 'id' => 'rate_limit_window', 'title' => __('Time Window (seconds)', 'wp-web-scraper'), 
 					'callback' => array('WP_Web_Scraper_Admin', 'fields_cb'), 'page' => 'wp_web_scraper_settings', 
 					'section' => 'section_rate_limiting', 
@@ -143,7 +148,74 @@ class WP_Web_Scraper_Admin {
 			add_settings_section( $section['id'], $section['title'], $section['callback'], $section['page'] );
 		foreach ($settings['fields'] as $field)
 			add_settings_field( $field['id'], $field['title'], $field['callback'], $field['page'], $field['section'], $field['args'] );
-		register_setting( $settings['option_group'], $settings['option_group'] );
+		register_setting( $settings['option_group'], $settings['option_group'], array(
+			'sanitize_callback' => array( 'WP_Web_Scraper_Admin', 'sanitize_options' ),
+		) );
+	}
+
+	/**
+	 * Sanitize the wpws_options array on save.
+	 *
+	 * Previously options were stored exactly as posted. Besides accepting junk,
+	 * that meant an unchecked checkbox was simply missing from the array — and a
+	 * missing "sanitize_html" falls back to ON, so it could never be switched off.
+	 * Checkboxes are now always stored explicitly as 0/1.
+	 *
+	 * @param mixed $input Raw posted value.
+	 * @return array Clean options.
+	 */
+	public static function sanitize_options( $input ) {
+		$input = is_array( $input ) ? $input : array();
+		$out   = array();
+
+		foreach ( array( 'sc_posts', 'sc_widgets', 'tt', 'sanitize_html', 'allow_localhost', 'require_https' ) as $key ) {
+			$out[ $key ] = empty( $input[ $key ] ) ? 0 : 1;
+		}
+
+		$on_error = isset( $input['on_error'] ) ? sanitize_text_field( $input['on_error'] ) : 'error_show';
+		$out['on_error'] = $on_error !== '' ? $on_error : 'error_show';
+
+		$useragent = isset( $input['useragent'] ) ? sanitize_text_field( $input['useragent'] ) : '';
+		$out['useragent'] = $useragent !== ''
+			? $useragent
+			: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+		$out['timeout']           = isset( $input['timeout'] ) ? min( 120, max( 1, absint( $input['timeout'] ) ) ) : 10;
+		$out['cache']             = isset( $input['cache'] ) ? absint( $input['cache'] ) : 60;
+		$out['rate_limit_max']    = isset( $input['rate_limit_max'] ) ? absint( $input['rate_limit_max'] ) : 20;
+		$out['rate_limit_window'] = isset( $input['rate_limit_window'] ) ? max( 1, absint( $input['rate_limit_window'] ) ) : 60;
+
+		foreach ( array( 'whitelist_domains', 'blacklist_domains' ) as $key ) {
+			$domains = array();
+			$raw     = isset( $input[ $key ] ) ? (string) $input[ $key ] : '';
+			foreach ( preg_split( '/\r\n|\r|\n/', $raw ) as $line ) {
+				$line = strtolower( trim( $line ) );
+				if ( $line !== '' && preg_match( '/^[a-z0-9.-]+$/', $line ) ) {
+					$domains[] = $line;
+				}
+			}
+			$out[ $key ] = implode( "\n", array_unique( $domains ) );
+		}
+
+		// Auth profiles: keep only lines that parse; report the rest.
+		$kept = array(); $dropped = 0;
+		$raw  = isset( $input['auth_profiles'] ) ? (string) $input['auth_profiles'] : '';
+		foreach ( preg_split( '/\r\n|\r|\n/', $raw ) as $line ) {
+			$line = trim( wp_strip_all_tags( $line ) );
+			if ( $line === '' ) continue;
+			if ( $line[0] === '#' || WP_Web_Scraper_Security::parse_auth_profiles_line_is_valid( $line ) ) {
+				$kept[] = $line;
+			} else {
+				$dropped++;
+			}
+		}
+		$out['auth_profiles'] = implode( "\n", $kept );
+		if ( $dropped > 0 && function_exists( 'add_settings_error' ) ) {
+			add_settings_error( 'wpws_options', 'wpws_auth_profiles',
+				sprintf( _n( '%d authentication profile line was invalid and has been removed.', '%d authentication profile lines were invalid and have been removed.', $dropped, 'wp-web-scraper' ), $dropped ) );
+		}
+
+		return $out;
 	}
 
 	// -------------------------------------------------------------------------

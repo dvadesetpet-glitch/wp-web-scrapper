@@ -33,6 +33,8 @@ class WP_Web_Scraper {
 	const MAX_REDIRECTS = 5;
 	const MAX_RESPONSE_SIZE = 10485760; // 10MB
 	const MAX_DOM_DEPTH = 1000;
+	/** Lifetime of a stored AJAX lazy-load job (re-created on the next render). */
+	const AJAX_JOB_TTL = 2592000; // 30 days
 
 	// -------------------------------------------------------------------------
 	// Registration, views, activation
@@ -52,7 +54,9 @@ class WP_Web_Scraper {
 		if ( ! empty( $wpws_options['sc_widgets'] ) )
 			add_filter( 'widget_text', 'do_shortcode' );
 
-		// AJAX scrape endpoint (logged-in and public)
+		// AJAX scrape endpoint (logged-in and public). The request carries only
+		// an opaque job ID; URL, query and arguments never come from the client
+		// (see _store_ajax_job / ajax_scrape).
 		add_action( 'wp_ajax_wpws_scrape',        array( 'WP_Web_Scraper', 'ajax_scrape' ) );
 		add_action( 'wp_ajax_nopriv_wpws_scrape', array( 'WP_Web_Scraper', 'ajax_scrape' ) );
 
@@ -176,7 +180,24 @@ class WP_Web_Scraper {
 				return new WP_Error( 'wpws_ssrf_blocked', 'Blocked request: ' . $validation['error'] );
 			}
 
+			// Rate limit real outgoing fetches only (per remote host). Checking
+			// it on every page view — cache hits included — made busy pages hit
+			// the limit and render nothing even though no request was made.
+			if ( $i === 0 ) {
+				$rate = WP_Web_Scraper_Security::check_rate_limit( (string) wp_parse_url( $url, PHP_URL_HOST ) );
+				if ( ! $rate['allowed'] ) {
+					return new WP_Error( 'wpws_rate_limited', $rate['error'] );
+				}
+			}
+
+			// Pin the connection to the IPs that validate_url() just checked,
+			// so a DNS-rebinding server cannot answer the HTTP client's own
+			// lookup with a private address.
+			$pin      = self::_pin_dns( $url, isset( $validation['ips'] ) ? $validation['ips'] : array() );
 			$response = wp_remote_request( $url, $args );
+			if ( $pin ) {
+				remove_action( 'http_api_curl', $pin, 10 );
+			}
 			if ( is_wp_error( $response ) ) {
 				return $response;
 			}
@@ -196,6 +217,81 @@ class WP_Web_Scraper {
 		}
 
 		return new WP_Error( 'http_request_failed', 'Too many redirects' );
+	}
+
+	/**
+	 * Register a one-shot http_api_curl hook that forces cURL to connect to an
+	 * already-validated IP for $url's host (CURLOPT_RESOLVE). TLS still
+	 * verifies the certificate against the hostname.
+	 *
+	 * Only effective with the cURL transport (the WordPress default when the
+	 * extension is present). Returns the hook callback so the caller can
+	 * remove it, or null when nothing needs pinning.
+	 *
+	 * @param string $url URL about to be requested.
+	 * @param array  $ips Validated IPs for its host.
+	 * @return callable|null
+	 */
+	private static function _pin_dns( $url, $ips ) {
+		if ( empty( $ips ) || ! defined( 'CURLOPT_RESOLVE' ) ) {
+			return null;
+		}
+		$parts = wp_parse_url( $url );
+		if ( empty( $parts['host'] ) ) {
+			return null;
+		}
+		$host = strtolower( trim( $parts['host'], '[]' ) );
+		if ( filter_var( $host, FILTER_VALIDATE_IP ) ) {
+			return null; // IP literal: nothing to resolve.
+		}
+
+		$scheme = isset( $parts['scheme'] ) ? strtolower( $parts['scheme'] ) : 'http';
+		$port   = isset( $parts['port'] ) ? (int) $parts['port'] : ( $scheme === 'https' ? 443 : 80 );
+
+		// Prefer IPv4 (most compatible); bracket IPv6 for CURLOPT_RESOLVE.
+		$ip = null;
+		foreach ( $ips as $candidate ) {
+			if ( filter_var( $candidate, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 ) ) { $ip = $candidate; break; }
+		}
+		if ( $ip === null ) {
+			$ip = '[' . $ips[0] . ']';
+		}
+		$entry = $host . ':' . $port . ':' . $ip;
+
+		$cb = function ( $handle, $r = null, $request_url = '' ) use ( $entry, $host ) {
+			if ( $request_url !== '' && strtolower( (string) wp_parse_url( $request_url, PHP_URL_HOST ) ) !== $host ) {
+				return;
+			}
+			curl_setopt( $handle, CURLOPT_RESOLVE, array( $entry ) );
+		};
+		add_action( 'http_api_curl', $cb, 10, 3 );
+		return $cb;
+	}
+
+	/**
+	 * Store the parameters of an AJAX lazy-load request server-side and return
+	 * an opaque, unguessable ID for the placeholder.
+	 *
+	 * The browser only ever sends this ID back, so visitors cannot make the
+	 * site fetch arbitrary URLs, and credentials/headers never appear in the
+	 * page HTML. The ID is an HMAC of the job (keyed with the site salt), so
+	 * it is stable across page views — full-page caches keep working.
+	 *
+	 * @param string $url   Source URL (unresolved placeholders are fine).
+	 * @param string $query Query.
+	 * @param array  $args  Resolved arguments.
+	 * @return string 32-char hex job ID.
+	 */
+	private static function _store_ajax_job( $url, $query, $args ) {
+		$args = array_diff_key( $args, array_flip( array( 'ajax', 'debug' ) ) );
+		ksort( $args );
+		$job = array( 'url' => $url, 'query' => $query, 'args' => $args );
+		$id  = wp_hash( serialize( $job ), 'nonce' );
+		$key = 'wpws_job_' . $id;
+		if ( get_transient( $key ) === false ) {
+			set_transient( $key, $job, self::AJAX_JOB_TTL );
+		}
+		return $id;
 	}
 
 	/**
@@ -445,25 +541,15 @@ class WP_Web_Scraper {
 			return self::_handle_error();
 		}
 
-		// Rate limit check (per domain)
-		$parsed_url = wp_parse_url( $url );
-		$domain     = isset( $parsed_url['host'] ) ? $parsed_url['host'] : $url;
-		$rate_limit_check = WP_Web_Scraper_Security::check_rate_limit( $domain );
-		if ( ! $rate_limit_check['allowed'] ) {
-			self::$error = $rate_limit_check['error'];
-			return self::_handle_error();
-		}
+		// Rate limiting is applied to actual outgoing fetches (cache misses) in
+		// _http_request_ssrf_safe(), not here on every render.
 
-		// AJAX lazy-load: return a placeholder div; wpws-frontend.js will populate it.
+		// AJAX lazy-load: return a placeholder carrying only an opaque job ID.
+		// URL, query, headers and credentials stay on the server.
 		if ( ! empty( self::$args['ajax'] ) && self::$args['ajax'] == 1 ) {
 			wp_enqueue_script( 'wpws-frontend' );
-			$pass_args = array_diff_key( self::$args, array_flip( array( 'ajax', 'on_error', 'debug' ) ) );
-			return '<div class="wpws-ajax-placeholder"'
-				. ' data-wpws-url="' . esc_attr( $url ) . '"'
-				. ' data-wpws-query="' . esc_attr( $query ) . '"'
-				. ' data-wpws-args="' . esc_attr( wp_json_encode( $pass_args ) ) . '"'
-				. ' data-wpws-nonce="' . esc_attr( wp_create_nonce( 'wpws_ajax_nonce' ) ) . '">'
-				. '</div>';
+			$job_id = self::_store_ajax_job( $url, $query, self::$args );
+			return '<div class="wpws-ajax-placeholder" data-wpws-id="' . esc_attr( $job_id ) . '"></div>';
 		}
 
 		// Validate query. Read the type from the normalised self::$args, not the
@@ -804,6 +890,24 @@ class WP_Web_Scraper {
 		}
 
 		// ── HTTP Authentication ───────────────────────────────────────────────
+		// Preferred: a named profile from Settings (secret never in post content).
+		if ( ! empty( $request_args['auth_profile'] ) ) {
+			$profile = WP_Web_Scraper_Security::get_auth_profile( $request_args['auth_profile'] );
+			if ( $profile === null ) {
+				return new WP_Error( 'wpws_auth_profile', 'Unknown auth profile "' . sanitize_key( $request_args['auth_profile'] ) . '"' );
+			}
+			$request_args['auth_type'] = $profile['type'];
+			if ( $profile['type'] === 'bearer' ) {
+				$request_args['auth_token'] = $profile['token'];
+			} elseif ( $profile['type'] === 'basic' ) {
+				$request_args['auth_user'] = $profile['user'];
+				$request_args['auth_pass'] = $profile['pass'];
+			} elseif ( $profile['type'] === 'header' ) {
+				$request_args['headers'][ $profile['header'] ] = $profile['value'];
+			}
+		}
+
+		// Legacy inline credentials (auth_user/auth_pass/auth_token attributes).
 		$auth_type = isset( $request_args['auth_type'] ) ? strtolower( $request_args['auth_type'] ) : 'none';
 		if ( $auth_type === 'bearer' && ! empty( $request_args['auth_token'] ) ) {
 			$request_args['headers']['Authorization'] = 'Bearer ' . $request_args['auth_token'];
@@ -1006,7 +1110,9 @@ class WP_Web_Scraper {
 			'charset'            => get_bloginfo( 'charset' ),
 			'mobile'             => 0,
 			'mobile_type'        => 'generic',
-			// HTTP authentication
+			// HTTP authentication. Prefer auth_profile (defined in Settings);
+			// the inline fields below are kept for backward compatibility.
+			'auth_profile'       => '',
 			'auth_type'          => 'none',   // none | basic | bearer
 			'auth_user'          => '',
 			'auth_pass'          => '',
@@ -1051,26 +1157,34 @@ class WP_Web_Scraper {
 		);
 		wp_localize_script( 'wpws-frontend', 'wpwsAjax', array(
 			'ajaxurl' => admin_url( 'admin-ajax.php' ),
-			'nonce'   => wp_create_nonce( 'wpws_ajax_nonce' ),
 		) );
 	}
 
-	/** AJAX handler: verify nonce, run get_content, return JSON. */
+	/**
+	 * AJAX handler: look up a job stored by _store_ajax_job(), run it, return JSON.
+	 *
+	 * Only a job ID is accepted from the client. IDs are HMACs keyed with the
+	 * site salt and exist only for requests an author placed on a page, so the
+	 * endpoint can no longer be used as an open proxy. No nonce is required:
+	 * it protected nothing here (the same anonymous nonce was printed on the
+	 * page for everyone) and broke lazy-loading on full-page-cached pages
+	 * once it expired.
+	 */
 	public static function ajax_scrape() {
-		check_ajax_referer( 'wpws_ajax_nonce', 'nonce' );
-
-		$url   = isset( $_POST['wpws_url'] )   ? esc_url_raw( wp_unslash( $_POST['wpws_url'] ) )                     : '';
-		$query = isset( $_POST['wpws_query'] ) ? sanitize_text_field( wp_unslash( $_POST['wpws_query'] ) )           : '';
-		$args  = isset( $_POST['wpws_args'] )  ? (array) json_decode( wp_unslash( $_POST['wpws_args'] ), true ) : array();
-
-		if ( empty( $url ) ) {
-			wp_send_json_error( array( 'message' => 'Missing URL' ), 400 );
+		$id = isset( $_POST['wpws_id'] ) ? strtolower( (string) wp_unslash( $_POST['wpws_id'] ) ) : '';
+		if ( ! preg_match( '/^[a-f0-9]{32}$/', $id ) ) {
+			wp_send_json_error( array( 'message' => 'Invalid request' ), 400 );
 		}
 
-		// Disallow ajax=1 inside the AJAX handler itself (prevent recursion)
-		$args['ajax'] = 0;
+		$job = get_transient( 'wpws_job_' . $id );
+		if ( ! is_array( $job ) || empty( $job['url'] ) ) {
+			wp_send_json_error( array( 'message' => 'Unknown or expired request' ), 404 );
+		}
 
-		wp_send_json_success( array( 'html' => self::get_content( $url, $query, $args ) ) );
+		$args         = isset( $job['args'] ) ? (array) $job['args'] : array();
+		$args['ajax'] = 0; // prevent recursion
+
+		wp_send_json_success( array( 'html' => self::get_content( $job['url'], (string) $job['query'], $args ) ) );
 	}
 
 	// -------------------------------------------------------------------------
@@ -1122,6 +1236,9 @@ class WP_Web_Scraper {
 				'query_type'         => array( 'type' => 'string',  'default' => 'cssselector' ),
 				'cache'              => array( 'type' => 'integer', 'default' => 60 ),
 				'output'             => array( 'type' => 'string',  'default' => 'html' ),
+				'auth_profile'       => array( 'type' => 'string',  'default' => '' ),
+				// Legacy inline credentials: still honoured so existing blocks keep
+				// working, but no longer editable in the UI (see wpws-block.js).
 				'auth_type'          => array( 'type' => 'string',  'default' => 'none' ),
 				'auth_user'          => array( 'type' => 'string',  'default' => '' ),
 				'auth_pass'          => array( 'type' => 'string',  'default' => '' ),

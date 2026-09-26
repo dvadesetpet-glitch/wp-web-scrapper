@@ -221,11 +221,15 @@ ul.args li { margin: 0.4rem 0; padding-left: 1rem; border-left: 3px solid var(--
 <div class="block">
 <strong>Example – JSON response, extract one field via <code>callback</code>:</strong>
 <pre><code>[wpws url="https://api.ipify.org?format=json" basehref="0" callback="wpws_my_json_parser"]</code></pre>
-<p>In theme <code>functions.php</code> (the <code>wpws_</code> prefix means it is allow-listed automatically):</p>
+<p>In theme <code>functions.php</code> (custom functions must be added to the allow-list — the <code>wpws_</code> prefix alone is no longer enough):</p>
 <pre><code>function wpws_my_json_parser( $content ) {
     $obj = json_decode( trim( $content ) );
     return $obj ? $obj-&gt;ip : '';
-}</code></pre>
+}
+add_filter( 'wpws_allowed_callbacks', function ( $list ) {
+    $list[] = 'wpws_my_json_parser';
+    return $list;
+} );</code></pre>
 <p><em>Tip: for JSON, the built-in <a href="#query-types">JSONPath</a> query type (<code>query="$.ip" query_type="jsonpath"</code>) does this with no callback.</em></p>
 </div>
 
@@ -272,14 +276,20 @@ ul.args li { margin: 0.4rem 0; padding-left: 1rem; border-left: 3px solid var(--
 <!-- AUTH -->
 <section id="auth">
 <h2>Authentication</h2>
-<p>Send credentials with the request to scrape protected endpoints:</p>
+<p>Send credentials with the request to scrape protected endpoints. <strong>Recommended: authentication profiles.</strong> Define credentials once under <em>Settings → WP WS Reborn 2026 → Authentication profiles</em>, one per line:</p>
+<pre><code>myapi   | bearer | YOUR_TOKEN
+intranet| basic  | USER | PASSWORD
+keyed   | header | X-Api-Key | YOUR_KEY</code></pre>
+<p>then reference the profile by name — the secret never enters post content, revisions or page HTML:</p>
+<pre><code>[wpws url="https://api.example.com/data" query="$.value" query_type="jsonpath" auth_profile="myapi"]</code></pre>
+<p>Developers can supply profiles from <code>wp-config.php</code> constants or environment variables with the <code>wpws_auth_profiles</code> filter instead of storing them in the database.</p>
+<p><strong>Legacy inline credentials</strong> (still supported, not recommended):</p>
 <ul class="args">
 <li><code>auth_type</code> – <code>none</code> (default), <code>basic</code>, or <code>bearer</code>.</li>
 <li><code>auth_user</code> / <code>auth_pass</code> – username and password for <code>basic</code> auth (sent as an <code>Authorization: Basic</code> header).</li>
 <li><code>auth_token</code> – token for <code>bearer</code> auth (sent as <code>Authorization: Bearer …</code>).</li>
 </ul>
-<pre><code>[wpws url="https://api.example.com/data" query="$.value" query_type="jsonpath" auth_type="bearer" auth_token="YOUR_TOKEN"]</code></pre>
-<div class="note"><strong>Security:</strong> credentials placed in a shortcode are stored in the post content. Prefer the <a href="#block">block</a> or template tag, restrict who can edit those posts, and use HTTPS endpoints. Credentials are never printed in the debug comment (they are masked).</div>
+<div class="note"><strong>Security:</strong> inline credentials are stored in the post content and every revision, visible to anyone who can edit the post. Use <code>auth_profile</code> instead. The block editor no longer offers inline credential fields and shows a warning (with a one-click remove) for blocks that still contain them. Credentials are never printed in the debug comment or in AJAX placeholders.</div>
 </section>
 
 <!-- MOBILE -->
@@ -368,8 +378,10 @@ ul.args li { margin: 0.4rem 0; padding-left: 1rem; border-left: 3px solid var(--
 <li><strong>Domain whitelist / blacklist</strong> – restrict scraping to (or away from) specific domains, one per line.</li>
 <li><strong>Require HTTPS</strong> – reject plain <code>http://</code> URLs.</li>
 <li><strong>HTML sanitisation</strong> – scraped output is run through <code>wp_kses</code> (post context) and <code>&lt;script&gt;</code> blocks are stripped.</li>
-<li><strong>Rate limiting</strong> – cap requests per domain per time window (default 20 / 60&nbsp;s).</li>
-<li><strong>Allow-listed callbacks</strong> – only <code>wpws_*</code> and explicitly registered functions may run as callbacks (see <a href="#callbacks">Callbacks</a>).</li>
+<li><strong>DNS pinning</strong> – the connection is made to the exact IP that passed the SSRF check (cURL transport), so DNS-rebinding cannot swap in an internal address between check and fetch. Hosts that do not resolve are blocked.</li>
+<li><strong>Rate limiting</strong> – cap outgoing requests per remote host per time window (default 20 / 60&nbsp;s). Only real fetches count; cache hits do not.</li>
+<li><strong>Allow-listed callbacks</strong> – only the plugin's built-in helpers and functions you register via the <code>wpws_allowed_callbacks</code> filter may run as callbacks (see <a href="#callbacks">Callbacks</a>).</li>
+<li><strong>AJAX lazy-load</strong> – the placeholder carries only an opaque ID; URL, query and credentials stay on the server, so the endpoint cannot be used as an open proxy.</li>
 </ul>
 <div class="note">“Allow access to localhost / private IPs” exists for local development only — leaving it on in production exposes your server to SSRF. Keep it off unless you know you need it.</div>
 </section>

@@ -380,7 +380,7 @@
                         <li><code>timeout="10"</code> - request timeout in seconds (default: 10, minimum 5)</li>
                         <li><code>useragent</code> – custom User-Agent (default: latest Chrome desktop)</li>
                         <li><code>headers="key1=value1&key2=value2"</code> – extra POST body (query string); request becomes POST</li>
-                        <li><code>auth_type="bearer"</code> + <code>auth_token="…"</code>, or <code>auth_type="basic"</code> + <code>auth_user</code>/<code>auth_pass</code> – HTTP authentication</li>
+                        <li><code>auth_profile="name"</code> – HTTP authentication using a profile from Settings → Authentication profiles (recommended; legacy inline <code>auth_type</code>/<code>auth_token</code>/<code>auth_user</code>/<code>auth_pass</code> still work but store secrets in post content)</li>
                         <li><code>mobile="1"</code> + <code>mobile_type="iphone"</code> (android/iphone/ipad/generic) – request the mobile version</li>
                         <li><code>ajax="1"</code> – lazy-load via AJAX after page render; <code>background_refresh="1"</code> – stale-while-revalidate cache refresh via WP-Cron</li>
                     </ul>
@@ -424,7 +424,7 @@
                         <li><strong>Parameterised:</strong> <code>callback="wpws_drop_columns:4"</code> passes <code>"4"</code> as a second argument to the function</li>
                     </ul>
                     <div class="note">
-                        <strong>Allow-list:</strong> only allow-listed functions may run as callbacks. Any function named <code>wpws_*</code> is allowed automatically; to permit your own non-<code>wpws_</code> function, add it via the <code>wpws_allowed_callbacks</code> filter.
+                        <strong>Allow-list:</strong> only allow-listed functions may run as callbacks: the plugin's built-in helpers plus anything you add via the <code>wpws_allowed_callbacks</code> filter. (A <code>wpws_</code> name prefix is no longer allowed automatically.)
                     </div>
                 </div>
 
@@ -601,10 +601,12 @@
                     <h4>Security features:</h4>
                     <ul>
                         <li><strong>SSRF protection</strong> - blocks localhost / private IPs and re-validates every redirect (configurable; whitelist &amp; blacklist domains, require HTTPS)</li>
-                        <li><strong>Rate limiting</strong> - default 20 requests per minute per domain (configurable in Settings)</li>
-                        <li><strong>Allow-listed callbacks</strong> - only <code>wpws_*</code> and registered functions may run</li>
+                        <li><strong>DNS pinning</strong> - connects to the IP that passed the SSRF check, blocking DNS-rebinding</li>
+                        <li><strong>Rate limiting</strong> - default 20 outgoing requests per minute per remote host; cache hits are not counted (configurable in Settings)</li>
+                        <li><strong>Allow-listed callbacks</strong> - only built-in helpers and functions registered via <code>wpws_allowed_callbacks</code> may run</li>
+                        <li><strong>Authentication profiles</strong> - credentials live in Settings, not in post content or page HTML</li>
                         <li><strong>Input sanitization</strong> - all inputs are sanitized</li>
-                        <li><strong>CSRF protection</strong> - WordPress nonce verification</li>
+                        <li><strong>CSRF protection</strong> - WordPress nonce verification on admin forms; the public AJAX endpoint accepts only server-issued job IDs</li>
                         <li><strong>XSS protection</strong> - output filtered with <code>wp_kses</code>; <code>&lt;script&gt;</code> stripped; credentials masked in debug output</li>
                     </ul>
                     <p>Configure these under the <strong>Security</strong> and <strong>Rate Limiting</strong> sections of the Settings tab.</p>

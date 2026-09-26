@@ -4,7 +4,7 @@
 Plugin Name: WP WS Reborn 2026
 Plugin URI: http://wp-ws.net/
 Description: Web scraper for WordPress. Display realtime data from any website in posts, pages or sidebar. Fork of WP Web Scraper with feed link shortcodes (wpws_atom_links, wpws_atom_zip_links).
-Version: 1.1
+Version: 1.2
 Author: Akshay Raje (original), Reborn 2026
 Author URI: http://webdlabs.com/
 */
@@ -16,7 +16,7 @@ if (!function_exists('add_action'))
 define('WPWS__PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('WPWS__PLUGIN_URL', plugin_dir_url(__FILE__));
 define('WPWS__PLUGIN_FILE', plugin_basename(__FILE__));
-define('WPWS__VERSION', '1.1');
+define('WPWS__VERSION', '1.2');
 
 require_once( WPWS__PLUGIN_DIR . 'class.wpws-security.php' );
 require_once( WPWS__PLUGIN_DIR . 'class.wpws.php' );

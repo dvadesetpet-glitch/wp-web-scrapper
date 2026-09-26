@@ -4,7 +4,7 @@ Tags: web scraping, css selector, xpath, regex, realtime, shortcode, atom, rss, 
 Requires at least: 5.0
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 1.1
+Stable tag: 1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -32,6 +32,16 @@ Original plugin: [WP Web Scraper](http://wp-ws.net/). Original readme and full c
 3. Configure defaults under Settings → WP Web Scraper; use Sandbox to test shortcodes
 
 == Changelog ==
+
+= 1.2 =
+* Security (critical): AJAX lazy-load (`ajax="1"`) no longer accepts URL, query or arguments from the browser. The placeholder carries only an opaque, HMAC-derived job ID and the parameters stay server-side, so `admin-ajax.php?action=wpws_scrape` can no longer be used as an open proxy by anonymous visitors. The nonce was dropped from this endpoint (it protected nothing and broke lazy-loading on full-page-cached pages once expired).
+* Security (critical): credentials (`auth_user`, `auth_pass`, `auth_token`) and `headers` are no longer written into the public page HTML of AJAX placeholders.
+* Feature: authentication profiles (Settings → Authentication profiles; `auth_profile="name"`) with bearer, basic and custom-header types, plus a `wpws_auth_profiles` filter for wp-config/env secrets. The block editor no longer stores credentials; blocks that still contain them show a warning and a one-click remove. Legacy inline credentials keep working.
+* Security: DNS pinning — requests connect (via CURLOPT_RESOLVE) to the IP that passed the SSRF check, closing the DNS-rebinding window. Hosts that do not resolve are now blocked.
+* Security: callback allow-list is now explicit. The "any function named wpws_*" wildcard is removed (it also matched fetch functions such as `wpws_get_content`). **Breaking:** custom `wpws_*` callbacks must be registered via the `wpws_allowed_callbacks` filter.
+* Security: settings are sanitized on save (`register_setting` sanitize callback): numeric ranges, domain lists, auth profile syntax. Checkboxes are always stored as 0/1 — fixes "Sanitize HTML Output" silently staying on after being unchecked.
+* Fix: rate limiting is now atomic (no lost updates under concurrent requests) and counts only real outgoing fetches per remote host. Previously every page view — including cache hits — counted, so busy pages could hit the limit and render nothing.
+* Fix: `memory_limit = -1` (unlimited) no longer makes every response fail with "Content too large".
 
 = 1.1 =
 * Security: SSRF protection now re-validates every redirect hop (blocks public→internal redirects, e.g. cloud metadata), resolves both IPv4 (A) and IPv6 (AAAA) records, and blocks hex/octal/decimal integer-IP encodings.

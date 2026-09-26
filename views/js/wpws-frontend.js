@@ -2,22 +2,18 @@
 (function ( $ ) {
 	'use strict';
 
+	// Each placeholder carries only an opaque job ID. The server looks up the
+	// URL, query and arguments itself, so nothing sensitive is in the page and
+	// the endpoint cannot be pointed at arbitrary URLs.
 	function loadPlaceholder( $el ) {
-		var url   = $el.data( 'wpws-url' );
-		var query = $el.data( 'wpws-query' );
-		var args  = $el.data( 'wpws-args' );
-		var nonce = $el.data( 'wpws-nonce' );
-
-		if ( ! url ) return;
+		var id = $el.data( 'wpws-id' );
+		if ( ! id ) return;
 
 		$el.addClass( 'wpws-loading' );
 
 		$.post( wpwsAjax.ajaxurl, {
-			action     : 'wpws_scrape',
-			nonce      : nonce || wpwsAjax.nonce,
-			wpws_url   : url,
-			wpws_query : query || '',
-			wpws_args  : typeof args === 'object' ? JSON.stringify( args ) : ( args || '{}' ),
+			action  : 'wpws_scrape',
+			wpws_id : String( id ),
 		} )
 		.done( function ( response ) {
 			if ( response && response.success && response.data && response.data.html !== undefined ) {
